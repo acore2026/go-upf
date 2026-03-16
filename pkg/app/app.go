@@ -13,6 +13,7 @@ import (
 	"github.com/free5gc/go-upf/internal/forwarder"
 	"github.com/free5gc/go-upf/internal/logger"
 	"github.com/free5gc/go-upf/internal/pfcp"
+	"github.com/free5gc/go-upf/internal/sbi"
 	"github.com/free5gc/go-upf/pkg/factory"
 )
 
@@ -22,6 +23,7 @@ type UpfApp struct {
 	cfg        *factory.Config
 	driver     forwarder.Driver
 	pfcpServer *pfcp.PfcpServer
+	sbiServer  *sbi.Server
 }
 
 func NewApp(cfg *factory.Config) (*UpfApp, error) {
@@ -35,6 +37,10 @@ func NewApp(cfg *factory.Config) (*UpfApp, error) {
 
 func (u *UpfApp) Config() *factory.Config {
 	return u.cfg
+}
+
+func (u *UpfApp) PFCPServer() *pfcp.PfcpServer {
+	return u.pfcpServer
 }
 
 func (a *UpfApp) SetLogLevel(level string) {
@@ -81,6 +87,11 @@ func (u *UpfApp) Run() error {
 	u.driver.HandleReport(u.pfcpServer)
 	u.pfcpServer.Start(&u.wg)
 
+	if u.cfg.Sbi != nil {
+		u.sbiServer = sbi.NewServer(u)
+		u.sbiServer.Run(&u.wg)
+	}
+
 	logger.MainLog.Infoln("UPF started")
 
 	// Wait for interrupt signal to gracefully shutdown
@@ -110,6 +121,9 @@ func (u *UpfApp) listenShutdownEvent() {
 	<-u.ctx.Done()
 	if u.pfcpServer != nil {
 		u.pfcpServer.Stop()
+	}
+	if u.sbiServer != nil {
+		u.sbiServer.Shutdown()
 	}
 	if u.driver != nil {
 		u.driver.Close()

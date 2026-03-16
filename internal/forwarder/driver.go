@@ -40,6 +40,15 @@ type Driver interface {
 	HandleReport(report.Handler)
 }
 
+type gtp5gDriver interface {
+	Driver
+	Link() *Gtp5gLink
+}
+
+var openGtp5g = func(wg *sync.WaitGroup, addr string, mtu uint32) (gtp5gDriver, error) {
+	return OpenGtp5g(wg, addr, mtu)
+}
+
 func NewDriver(wg *sync.WaitGroup, cfg *factory.Config) (Driver, error) {
 	cfgGtpu := cfg.Gtpu
 	if cfgGtpu == nil {
@@ -47,6 +56,10 @@ func NewDriver(wg *sync.WaitGroup, cfg *factory.Config) (Driver, error) {
 	}
 
 	logger.MainLog.Infof("starting Gtpu Forwarder [%s]", cfgGtpu.Forwarder)
+	if cfgGtpu.Forwarder == "empty" {
+		logger.MainLog.Infof("using empty forwarder for control-plane and SBI testing")
+		return Empty{}, nil
+	}
 	if cfgGtpu.Forwarder == "gtp5g" {
 		var gtpuAddr string
 		var mtu uint32
@@ -59,12 +72,16 @@ func NewDriver(wg *sync.WaitGroup, cfg *factory.Config) (Driver, error) {
 		if gtpuAddr == "" {
 			return nil, errors.Errorf("not found GTP address")
 		}
-		driver, err := OpenGtp5g(wg, gtpuAddr, mtu)
+		driver, err := openGtp5g(wg, gtpuAddr, mtu)
 		if err != nil {
 			return nil, errors.Wrap(err, "open Gtp5g")
 		}
 
 		link := driver.Link()
+		if link == nil {
+			driver.Close()
+			return nil, errors.New("gtp5g link is nil")
+		}
 		for _, dnn := range cfg.DnnList {
 			_, dst, err := net.ParseCIDR(dnn.Cidr)
 			if err != nil {
