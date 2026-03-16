@@ -36,9 +36,13 @@ func ReadConfig(cfgPath string) (*Config, error) {
 	if err != nil {
 		return nil, errors.Errorf("ReadConfig [%s] Error: %+v", cfgPath, err)
 	}
+	cfg.SetDefaults()
 
 	govalidator.TagMap["cidr"] = govalidator.Validator(func(str string) bool {
 		return govalidator.IsCIDR(str)
+	})
+	govalidator.TagMap["scheme"] = govalidator.Validator(func(str string) bool {
+		return str == "https" || str == "http"
 	})
 	_, err = govalidator.ValidateStruct(cfg)
 	if err != nil {

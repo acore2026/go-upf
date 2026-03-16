@@ -12,6 +12,7 @@ var (
 	MainLog  *logrus.Entry
 	CfgLog   *logrus.Entry
 	PfcpLog  *logrus.Entry
+	SBILog   *logrus.Entry
 	BuffLog  *logrus.Entry
 	PerioLog *logrus.Entry
 	FwderLog *logrus.Entry
@@ -33,6 +34,7 @@ func init() {
 	MainLog = NfLog.WithField(logger_util.FieldCategory, "Main")
 	CfgLog = NfLog.WithField(logger_util.FieldCategory, "CFG")
 	PfcpLog = NfLog.WithField(logger_util.FieldCategory, "PFCP")
+	SBILog = NfLog.WithField(logger_util.FieldCategory, "SBI")
 	BuffLog = NfLog.WithField(logger_util.FieldCategory, "BUFF")
 	PerioLog = NfLog.WithField(logger_util.FieldCategory, "Perio")
 	FwderLog = NfLog.WithField(logger_util.FieldCategory, "FWD")
