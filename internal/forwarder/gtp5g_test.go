@@ -3,6 +3,9 @@ package forwarder
 import (
 	"bytes"
 	"net"
+	"os"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"sync"
 	"testing"
@@ -17,6 +20,39 @@ import (
 	"github.com/free5gc/go-upf/internal/report"
 	"github.com/free5gc/go-upf/pkg/factory"
 )
+
+func requireSudo(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		return
+	}
+
+	if os.Getenv("UPF_TEST_SUDO") == "1" {
+		t.Fatal("test was re-executed with sudo but is still not running as root")
+	}
+
+	sudoPath, err := exec.LookPath("sudo")
+	if err != nil {
+		t.Fatalf("sudo is required for %s: %v", t.Name(), err)
+	}
+
+	cmd := exec.Command(
+		sudoPath,
+		"-E",
+		os.Args[0],
+		"-test.run", "^"+regexp.QuoteMeta(t.Name())+"$",
+	)
+	cmd.Env = append(os.Environ(), "UPF_TEST_SUDO=1")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("sudo re-run failed for %s: %v", t.Name(), err)
+	}
+
+	t.Skip("completed via sudo re-run")
+}
 
 func Test_convertSlice(t *testing.T) {
 	t.Run("convert slices", func(t *testing.T) {
@@ -44,6 +80,7 @@ func TestGtp5g_CreateRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testing in short mode")
 	}
+	requireSudo(t)
 
 	var wg sync.WaitGroup
 	g, err := OpenGtp5g(&wg, ":"+strconv.Itoa(factory.UpfGtpDefaultPort), 1400)
@@ -286,6 +323,7 @@ func TestNewFlowDesc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testing in short mode")
 	}
+	requireSudo(t)
 
 	var wg sync.WaitGroup
 	g, err := OpenGtp5g(&wg, ":"+strconv.Itoa(factory.UpfGtpDefaultPort), 1400)

@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/wmnsk/go-pfcp/ie"
 
+	"github.com/free5gc/go-upf/internal/forwarder/userspace"
 	"github.com/free5gc/go-upf/internal/logger"
 	"github.com/free5gc/go-upf/internal/report"
 	"github.com/free5gc/go-upf/pkg/factory"
@@ -93,6 +94,13 @@ func NewDriver(wg *sync.WaitGroup, cfg *factory.Config) (Driver, error) {
 				driver.Close()
 				return nil, err
 			}
+		}
+		return driver, nil
+	}
+	if cfgGtpu.Forwarder == "userspace" {
+		driver, err := userspace.New(wg, cfg)
+		if err != nil {
+			return nil, errors.Wrap(err, "open userspace forwarder")
 		}
 		return driver, nil
 	}

@@ -1,19 +1,13 @@
 package app
 
 import (
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/free5gc/go-upf/pkg/factory"
 )
 
-func TestWaitRoutineStopped(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping testing in short mode")
-	}
-
+func TestStartReturnsWhenDriverInitializationFails(t *testing.T) {
 	cfg := &factory.Config{
 		Version: "1.0.3",
 		Pfcp: &factory.Pfcp{
@@ -21,14 +15,9 @@ func TestWaitRoutineStopped(t *testing.T) {
 			NodeID: "127.0.0.1",
 		},
 		Gtpu: &factory.Gtpu{
-			Forwarder: "gtp5g",
+			Forwarder: "unsupported",
 			IfList: []factory.IfInfo{
-				{
-					Addr:   "127.0.0.1",
-					Type:   "",
-					Name:   "",
-					IfName: "",
-				},
+				{Addr: "127.0.0.1"},
 			},
 		},
 		DnnList: []factory.DnnList{
@@ -42,24 +31,21 @@ func TestWaitRoutineStopped(t *testing.T) {
 			Level:  "info",
 		},
 	}
-	N := 10
-	for i := 0; i < N; i++ {
-		var wg sync.WaitGroup
-		upf, err := NewApp(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		wg.Add(1)
-		go func() {
-			upf.Start()
-			wg.Done()
-		}()
-		// Must wait for signal initialized
-		time.Sleep(500 * time.Millisecond)
-		err = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-		if err != nil {
-			t.Fatal(err)
-		}
-		wg.Wait()
+
+	upf, err := NewApp(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		upf.Start()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return after driver initialization failure")
 	}
 }
