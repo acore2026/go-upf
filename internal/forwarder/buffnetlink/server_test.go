@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"os/exec"
+	"regexp"
 	"sync"
 	"syscall"
 	"testing"
@@ -15,6 +17,39 @@ import (
 
 	"github.com/free5gc/go-upf/internal/report"
 )
+
+func requireSudo(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		return
+	}
+
+	if os.Getenv("UPF_TEST_SUDO") == "1" {
+		t.Fatal("test was re-executed with sudo but is still not running as root")
+	}
+
+	sudoPath, err := exec.LookPath("sudo")
+	if err != nil {
+		t.Fatalf("sudo is required for %s: %v", t.Name(), err)
+	}
+
+	cmd := exec.Command(
+		sudoPath,
+		"-E",
+		os.Args[0],
+		"-test.run", "^"+regexp.QuoteMeta(t.Name())+"$",
+	)
+	cmd.Env = append(os.Environ(), "UPF_TEST_SUDO=1")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("sudo re-run failed for %s: %v", t.Name(), err)
+	}
+
+	t.Skip("completed via sudo re-run")
+}
 
 type testHandler struct {
 	q map[uint64]map[uint16]chan []byte
@@ -75,6 +110,7 @@ func TestServer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testing in short mode")
 	}
+	requireSudo(t)
 
 	var wg sync.WaitGroup
 
@@ -161,10 +197,17 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(100 * time.Millisecond)
 
 		pdrid := uint16(3)
-		pkt, ok := s.Pop(seid, pdrid)
+		var ok bool
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			pkt, ok = s.Pop(seid, pdrid)
+			if ok {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 		if !ok {
 			t.Fatal("not found")
 		}

@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
@@ -45,8 +46,9 @@ type Pfcp struct {
 }
 
 type Gtpu struct {
-	Forwarder string   `yaml:"forwarder" valid:"required,in(gtp5g|empty)"`
-	IfList    []IfInfo `yaml:"ifList"    valid:"optional"`
+	Forwarder string     `yaml:"forwarder" valid:"required,in(gtp5g|empty|userspace)"`
+	IfList    []IfInfo   `yaml:"ifList"    valid:"optional"`
+	Userspace *Userspace `yaml:"userspace" valid:"optional"`
 }
 
 type IfInfo struct {
@@ -61,6 +63,13 @@ type DnnList struct {
 	Dnn       string `yaml:"dnn"       valid:"required"`
 	Cidr      string `yaml:"cidr"      valid:"required,cidr"`
 	NatIfName string `yaml:"natifname" valid:"optional"`
+}
+
+type Userspace struct {
+	Workers   int    `yaml:"workers"   valid:"optional"`
+	QueueSize int    `yaml:"queueSize" valid:"optional"`
+	TunName   string `yaml:"tunName"   valid:"optional"`
+	TunMTU    uint32 `yaml:"tunMtu"    valid:"optional"`
 }
 
 type Logger struct {
@@ -83,6 +92,24 @@ type Tls struct {
 }
 
 func (c *Config) SetDefaults() {
+	if c.Gtpu != nil && c.Gtpu.Forwarder == "userspace" {
+		if c.Gtpu.Userspace == nil {
+			c.Gtpu.Userspace = &Userspace{}
+		}
+		if c.Gtpu.Userspace.Workers <= 0 {
+			c.Gtpu.Userspace.Workers = runtime.GOMAXPROCS(0)
+			if c.Gtpu.Userspace.Workers <= 0 {
+				c.Gtpu.Userspace.Workers = 1
+			}
+		}
+		if c.Gtpu.Userspace.QueueSize <= 0 {
+			c.Gtpu.Userspace.QueueSize = 1024
+		}
+		if c.Gtpu.Userspace.TunName == "" {
+			c.Gtpu.Userspace.TunName = "upfusr0"
+		}
+	}
+
 	if c.NrfURI == "" {
 		c.NrfURI = UpfDefaultNrfURI
 	}
