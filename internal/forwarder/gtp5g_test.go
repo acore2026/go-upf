@@ -319,6 +319,47 @@ func TestGtp5g_CreateRules(t *testing.T) {
 	})
 }
 
+func TestGtp5g_QERFieldsMatchPFCPInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testing in short mode")
+	}
+	requireSudo(t)
+
+	var wg sync.WaitGroup
+	g, err := OpenGtp5g(&wg, ":"+strconv.Itoa(factory.UpfGtpDefaultPort), 1400)
+	require.NoError(t, err)
+	defer g.Close()
+
+	lSeid := uint64(9)
+	req := ie.NewCreateQER(
+		ie.NewQERID(5),
+		ie.NewQERCorrelationID(9),
+		ie.NewGateStatus(ie.GateStatusClosed, ie.GateStatusOpen),
+		ie.NewMBR(200000, 100000),
+		ie.NewGBR(300000, 150000),
+		ie.NewQFI(10),
+		ie.NewRQI(1),
+		ie.NewPagingPolicyIndicator(7),
+	)
+	require.NoError(t, g.CreateQER(lSeid, req))
+
+	qer, err := gtp5gnl.GetQEROID(g.client, g.link.link, gtp5gnl.OID{lSeid, 5})
+	require.NoError(t, err)
+	require.NotNil(t, qer)
+	require.EqualValues(t, 5, qer.ID)
+	require.EqualValues(t, 9, qer.CorrID)
+	require.EqualValues(t, ie.GateStatusClosed<<2|ie.GateStatusOpen, qer.Gate)
+	require.EqualValues(t, 200000, qer.MBR.UL_Kbps)
+	require.EqualValues(t, 100000, qer.MBR.DL_Kbps)
+	require.EqualValues(t, 300000, qer.GBR.UL_Kbps)
+	require.EqualValues(t, 150000, qer.GBR.DL_Kbps)
+	require.EqualValues(t, 10, qer.QFI)
+	require.EqualValues(t, 1, qer.RQI)
+	require.EqualValues(t, 7, qer.PPI)
+
+	require.NoError(t, g.RemoveQER(lSeid, ie.NewRemoveQER(ie.NewQERID(5))))
+}
+
 func TestNewFlowDesc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testing in short mode")

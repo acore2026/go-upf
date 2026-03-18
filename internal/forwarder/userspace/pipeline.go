@@ -9,6 +9,7 @@ import (
 	"github.com/wmnsk/go-pfcp/ie"
 
 	"github.com/free5gc/go-upf/internal/gtpv1"
+	"github.com/free5gc/go-upf/internal/logger"
 	"github.com/free5gc/go-upf/internal/report"
 	"github.com/free5gc/go-upf/pkg/factory"
 )
@@ -60,6 +61,7 @@ func (d *Driver) processUplink(packet Packet, result PacketResult) PacketResult 
 
 	result.Binding = d.matchUplink(decoded.TEID, ueIP, meta)
 	if result.Binding == nil {
+		logger.FwderLog.Debugf("userspace uplink miss: teid=%d ue=%s src=%s dst=%s", decoded.TEID, ueIP, meta.SrcIP, meta.DstIP)
 		result.Err = errors.New("userspace: packet did not match any uplink PDR")
 		d.stats.uplinkPdrMisses.Add(1)
 		d.stats.uplinkPacketErrors.Add(1)
@@ -78,11 +80,13 @@ func (d *Driver) processUplink(packet Packet, result PacketResult) PacketResult 
 	case PacketActionForward:
 		outcome, err := d.forwardUplink(result.Binding, decoded.InnerPayload)
 		if err != nil {
+			logger.FwderLog.Debugf("userspace uplink forward error: teid=%d pdr=%d err=%v", decoded.TEID, result.Binding.PDR.ID, err)
 			result.Err = err
 			d.stats.uplinkPacketErrors.Add(1)
 			d.stats.droppedPackets.Add(1)
 			return result
 		}
+		logger.FwderLog.Debugf("userspace uplink forward: teid=%d pdr=%d seid=%d ue=%s dst=%s format=%d bytes=%d", decoded.TEID, result.Binding.PDR.ID, result.Binding.SEID, ueIP, meta.DstIP, outcome.Format, len(outcome.Payload))
 		result.Outcome = outcome
 		d.stats.forwardedPackets.Add(1)
 		d.publishOutcome(outcome)
@@ -122,6 +126,7 @@ func (d *Driver) processDownlink(packet Packet, result PacketResult) PacketResul
 
 	result.Binding = d.matchDownlink(ueIP, meta)
 	if result.Binding == nil {
+		logger.FwderLog.Debugf("userspace downlink miss: ue=%s src=%s dst=%s", ueIP, meta.SrcIP, meta.DstIP)
 		result.Err = errors.New("userspace: packet did not match any downlink PDR")
 		d.stats.downlinkPdrMisses.Add(1)
 		d.stats.downlinkPacketErrors.Add(1)
@@ -140,11 +145,13 @@ func (d *Driver) processDownlink(packet Packet, result PacketResult) PacketResul
 	case PacketActionForward:
 		outcome, err := d.forwardDownlink(result.Binding, packet.Payload)
 		if err != nil {
+			logger.FwderLog.Debugf("userspace downlink forward error: pdr=%d ue=%s src=%s dst=%s err=%v", result.Binding.PDR.ID, ueIP, meta.SrcIP, meta.DstIP, err)
 			result.Err = err
 			d.stats.downlinkPacketErrors.Add(1)
 			d.stats.droppedPackets.Add(1)
 			return result
 		}
+		logger.FwderLog.Debugf("userspace downlink forward: pdr=%d seid=%d ue=%s src=%s dst=%s format=%d bytes=%d", result.Binding.PDR.ID, result.Binding.SEID, ueIP, meta.SrcIP, meta.DstIP, outcome.Format, len(outcome.Payload))
 		result.Outcome = outcome
 		d.stats.forwardedPackets.Add(1)
 		d.publishOutcome(outcome)

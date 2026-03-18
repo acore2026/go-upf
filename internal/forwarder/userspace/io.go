@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"net"
+
+	"github.com/free5gc/go-upf/internal/logger"
 )
 
 const maxPacketSize = 64 * 1024
@@ -65,6 +67,7 @@ func (d *Driver) egressLoop() {
 			return
 		case outcome := <-d.egressCh:
 			if err := d.writeOutcome(outcome); err != nil && !d.isRuntimeClosed(err) {
+				logger.FwderLog.Debugf("userspace egress write error: format=%d pdr=%d seid=%d err=%v", outcome.Format, outcome.PDRID, outcome.SEID, err)
 				d.stats.egressErrors.Add(1)
 			}
 		}
