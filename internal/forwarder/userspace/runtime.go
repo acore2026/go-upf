@@ -191,19 +191,44 @@ func (d *Driver) MatchUplink(teid uint32, ueIP net.IP) *PDRBinding {
 func (d *Driver) matchUplink(teid uint32, ueIP net.IP, meta *packetMeta) *PDRBinding {
 	snapshot := d.Snapshot()
 	bindings := snapshot.Uplink[teid]
-	for _, binding := range bindings {
-		if binding.PDR == nil || binding.PDR.PDI == nil {
+	if binding := selectUplinkBinding(bindings, ueIP, meta); binding != nil {
+		return binding
+	}
+
+	// Some live free5GC/UERANSIM flows can shift the AN TEID without the
+	// userspace runtime seeing the updated uplink PDR TEID. Fall back to a
+	// global uplink scan and let precedence/SDF/UE-IP narrow the match.
+	var fallbackBindings []*PDRBinding
+	for key, candidates := range snapshot.Uplink {
+		if key == teid {
 			continue
 		}
-		if len(ueIP) > 0 && len(binding.PDR.PDI.UEIPv4) > 0 && !binding.PDR.PDI.UEIPv4.Equal(ueIP) {
+		fallbackBindings = append(fallbackBindings, candidates...)
+	}
+	return selectUplinkBinding(fallbackBindings, ueIP, meta)
+}
+
+func selectUplinkBinding(bindings []*PDRBinding, ueIP net.IP, meta *packetMeta) *PDRBinding {
+	var fallback *PDRBinding
+	for _, binding := range bindings {
+		if binding.PDR == nil || binding.PDR.PDI == nil {
 			continue
 		}
 		if !matchSDF(binding, meta, PacketDirectionUplink) {
 			continue
 		}
+		if len(ueIP) > 0 && len(binding.PDR.PDI.UEIPv4) > 0 {
+			if binding.PDR.PDI.UEIPv4.Equal(ueIP) {
+				return binding
+			}
+			if fallback == nil {
+				fallback = binding
+			}
+			continue
+		}
 		return binding
 	}
-	return nil
+	return fallback
 }
 
 func (d *Driver) MatchDownlink(ueIP net.IP) *PDRBinding {

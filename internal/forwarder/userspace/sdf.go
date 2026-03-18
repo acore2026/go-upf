@@ -173,24 +173,45 @@ func ruleMatches(rule *SDFFilterRule, ueIP net.IP, meta *packetMeta, direction P
 	}
 	switch rule.Direction {
 	case "out":
-		if direction != PacketDirectionUplink {
+		if direction != PacketDirectionUplink && !ruleUsesAssigned(rule) {
 			return false
 		}
 	case "in":
-		if direction != PacketDirectionDownlink {
+		if direction != PacketDirectionDownlink && !ruleUsesAssigned(rule) {
 			return false
 		}
 	}
 	if !protocolMatches(rule.Protocol, meta.Protocol) {
 		return false
 	}
-	if !endpointMatches(rule.Source, ueIP, meta.SrcIP, meta.SrcPort, meta.HasPorts) {
+	if endpointsMatchRule(rule, ueIP, meta.SrcIP, meta.SrcPort, meta.DstIP, meta.DstPort, meta.HasPorts) {
+		return true
+	}
+
+	// free5GC currently installs the same default SDF on both UL and DL PDRs.
+	// For the default "permit out ip from any to assigned" rule, UL packets
+	// should match even though the "assigned" UE IP appears as the source IP.
+	if direction == PacketDirectionUplink && ruleUsesAssigned(rule) {
+		return endpointsMatchRule(rule, ueIP, meta.DstIP, meta.DstPort, meta.SrcIP, meta.SrcPort, meta.HasPorts)
+	}
+	return false
+}
+
+func endpointsMatchRule(rule *SDFFilterRule, ueIP, srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, hasPorts bool) bool {
+	if !endpointMatches(rule.Source, ueIP, srcIP, srcPort, hasPorts) {
 		return false
 	}
-	if !endpointMatches(rule.Destination, ueIP, meta.DstIP, meta.DstPort, meta.HasPorts) {
+	if !endpointMatches(rule.Destination, ueIP, dstIP, dstPort, hasPorts) {
 		return false
 	}
 	return true
+}
+
+func ruleUsesAssigned(rule *SDFFilterRule) bool {
+	if rule == nil {
+		return false
+	}
+	return (rule.Source != nil && rule.Source.Assigned) || (rule.Destination != nil && rule.Destination.Assigned)
 }
 
 func protocolMatches(proto string, actual uint8) bool {

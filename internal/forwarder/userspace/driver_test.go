@@ -91,6 +91,46 @@ func TestRuleLifecycle(t *testing.T) {
 	driver.mu.RUnlock()
 }
 
+func TestQERStoresPFCPFieldsConsistently(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateQER(77, ie.NewCreateQER(
+		ie.NewQERID(5),
+		ie.NewQERCorrelationID(9),
+		ie.NewGateStatus(ie.GateStatusClosed, ie.GateStatusOpen),
+		ie.NewMBR(200000, 100000),
+		ie.NewGBR(300000, 150000),
+		ie.NewQFI(10),
+		ie.NewRQI(1),
+		ie.NewPagingPolicyIndicator(7),
+	)))
+
+	driver.mu.RLock()
+	qer := driver.sessions[77].QERs[5]
+	driver.mu.RUnlock()
+	require.NotNil(t, qer)
+	require.NotNil(t, qer.CorrelationID)
+	require.EqualValues(t, 9, *qer.CorrelationID)
+	require.NotNil(t, qer.GateStatus)
+	require.EqualValues(t, ie.GateStatusClosed<<2|ie.GateStatusOpen, *qer.GateStatus)
+	require.NotNil(t, qer.MBRUL)
+	require.NotNil(t, qer.MBRDL)
+	require.EqualValues(t, 200000, *qer.MBRUL)
+	require.EqualValues(t, 100000, *qer.MBRDL)
+	require.NotNil(t, qer.GBRUL)
+	require.NotNil(t, qer.GBRDL)
+	require.EqualValues(t, 300000, *qer.GBRUL)
+	require.EqualValues(t, 150000, *qer.GBRDL)
+	require.NotNil(t, qer.QFI)
+	require.EqualValues(t, 10, *qer.QFI)
+	require.NotNil(t, qer.RQI)
+	require.EqualValues(t, 1, *qer.RQI)
+	require.NotNil(t, qer.PPI)
+	require.EqualValues(t, 7, *qer.PPI)
+}
+
 func TestSnapshotIndexesAndClassification(t *testing.T) {
 	driver, err := New(nil, &factory.Config{
 		Gtpu: &factory.Gtpu{
@@ -347,6 +387,127 @@ func TestSDFSelectsMatchingUplinkPDR(t *testing.T) {
 	require.EqualValues(t, 2, result.Binding.PDR.ID)
 }
 
+func TestUplinkMatchFallsBackToTEIDWhenUEIPDiffers(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateFAR(33, ie.NewCreateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+	)))
+	require.NoError(t, driver.CreatePDR(33, ie.NewCreatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceAccess),
+			ie.NewFTEID(1, 0x6666, net.ParseIP("172.16.1.1"), nil, 0),
+			ie.NewUEIPAddress(2, "60.60.0.1", "", 0, 0),
+		),
+		ie.NewFARID(1),
+	)))
+
+	result := driver.DispatchPacket(Packet{
+		Direction: PacketDirectionUplink,
+		Payload:   encodeTestGTP(t, 0x6666, makeIPv4Packet("60.60.0.2", "8.8.8.8"), 0),
+	})
+
+	require.NoError(t, result.Err)
+	require.NotNil(t, result.Binding)
+	require.EqualValues(t, 1, result.Binding.PDR.ID)
+}
+
+func TestUplinkMatchFallsBackAcrossTEIDs(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateFAR(34, ie.NewCreateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+	)))
+	require.NoError(t, driver.CreatePDR(34, ie.NewCreatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceAccess),
+			ie.NewFTEID(1, 0x1111, net.ParseIP("172.16.1.1"), nil, 0),
+			ie.NewUEIPAddress(2, "60.60.0.2", "", 0, 0),
+		),
+		ie.NewFARID(1),
+	)))
+
+	result := driver.DispatchPacket(Packet{
+		Direction: PacketDirectionUplink,
+		Payload:   encodeTestGTP(t, 0x6666, makeIPv4Packet("60.60.0.2", "8.8.8.8"), 0),
+	})
+
+	require.NoError(t, result.Err)
+	require.NotNil(t, result.Binding)
+	require.EqualValues(t, 1, result.Binding.PDR.ID)
+}
+
+func TestUplinkMatchesDefaultAssignedRule(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateFAR(35, ie.NewCreateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+	)))
+	require.NoError(t, driver.CreatePDR(35, ie.NewCreatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceAccess),
+			ie.NewFTEID(1, 0x2222, net.ParseIP("172.16.1.1"), nil, 0),
+			ie.NewUEIPAddress(2, "60.60.0.35", "", 0, 0),
+			ie.NewSDFFilter("permit out ip from any to assigned", "", "", "", 0),
+		),
+		ie.NewFARID(1),
+	)))
+
+	result := driver.DispatchPacket(Packet{
+		Direction: PacketDirectionUplink,
+		Payload:   encodeTestGTP(t, 0x2222, makeIPv4Packet("60.60.0.35", "8.8.8.8"), 0),
+	})
+
+	require.NoError(t, result.Err)
+	require.NotNil(t, result.Binding)
+	require.EqualValues(t, 1, result.Binding.PDR.ID)
+}
+
+func TestDownlinkMatchesDefaultAssignedRule(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateFAR(36, ie.NewCreateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+	)))
+	require.NoError(t, driver.CreatePDR(36, ie.NewCreatePDR(
+		ie.NewPDRID(2),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceCore),
+			ie.NewUEIPAddress(2, "60.60.0.36", "", 0, 0),
+			ie.NewSDFFilter("permit out ip from any to assigned", "", "", "", 0),
+		),
+		ie.NewFARID(1),
+	)))
+
+	result := driver.DispatchPacket(Packet{
+		Direction: PacketDirectionDownlink,
+		Payload:   makeIPv4Packet("8.8.8.8", "60.60.0.36"),
+	})
+
+	require.NoError(t, result.Err)
+	require.NotNil(t, result.Binding)
+	require.EqualValues(t, 2, result.Binding.PDR.ID)
+}
+
 func TestSDFSelectsMatchingDownlinkPDR(t *testing.T) {
 	driver, err := New(nil, newUserspaceConfig(1))
 	require.NoError(t, err)
@@ -487,6 +648,88 @@ func TestBufferAndFarTransitionDrain(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for drained buffered packet")
 	}
+}
+
+func TestUpdatePDRPreservesExistingMatchFields(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateFAR(70, ie.NewCreateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+	)))
+	require.NoError(t, driver.CreatePDR(70, ie.NewCreatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceAccess),
+			ie.NewFTEID(1, 0x7001, net.ParseIP("172.16.1.1"), nil, 0),
+			ie.NewUEIPAddress(2, "60.60.0.70", "", 0, 0),
+		),
+		ie.NewOuterHeaderRemoval(0, 0),
+		ie.NewFARID(1),
+	)))
+
+	require.NoError(t, driver.UpdatePDR(70, ie.NewUpdatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(50),
+	)))
+
+	result := driver.DispatchPacket(Packet{
+		Direction: PacketDirectionUplink,
+		Payload:   encodeTestGTP(t, 0x7001, makeIPv4Packet("60.60.0.70", "8.8.8.8"), 0),
+	})
+
+	require.NoError(t, result.Err)
+	require.NotNil(t, result.Binding)
+	require.EqualValues(t, 1, result.Binding.PDR.ID)
+	require.EqualValues(t, 50, *result.Binding.PDR.Precedence)
+	require.NotNil(t, result.Binding.PDR.PDI)
+	require.NotNil(t, result.Binding.PDR.PDI.FTEID)
+	require.EqualValues(t, 0x7001, result.Binding.PDR.PDI.FTEID.TEID)
+	require.Equal(t, net.ParseIP("60.60.0.70").To4(), result.Binding.PDR.PDI.UEIPv4.To4())
+}
+
+func TestUpdateFARPreservesExistingOuterHeaderCreation(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateFAR(71, ie.NewCreateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+		ie.NewForwardingParameters(
+			ie.NewDestinationInterface(ie.DstInterfaceAccess),
+			ie.NewOuterHeaderCreation(256, 0x7101, "172.16.2.71", "", 2152, 0, 0),
+		),
+	)))
+	require.NoError(t, driver.CreatePDR(71, ie.NewCreatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceCore),
+			ie.NewUEIPAddress(2, "60.60.0.71", "", 0, 0),
+		),
+		ie.NewFARID(1),
+	)))
+
+	require.NoError(t, driver.UpdateFAR(71, ie.NewUpdateFAR(
+		ie.NewFARID(1),
+		ie.NewApplyAction(0x2),
+	)))
+
+	result := driver.DispatchPacket(Packet{
+		Direction: PacketDirectionDownlink,
+		Payload:   makeIPv4Packet("8.8.8.8", "60.60.0.71"),
+	})
+
+	require.NoError(t, result.Err)
+	require.NotNil(t, result.Outcome)
+	require.Equal(t, PayloadFormatGTPU, result.Outcome.Format)
+	decoded, err := decodeGTPU(result.Outcome.Payload)
+	require.NoError(t, err)
+	require.EqualValues(t, 0x7101, decoded.TEID)
 }
 
 func TestBufferHonorsBARSuggestedPacketLimit(t *testing.T) {
@@ -685,13 +928,14 @@ func TestStatsTrackForwardDropAndMisses(t *testing.T) {
 			ie.NewSourceInterface(ie.SrcInterfaceAccess),
 			ie.NewFTEID(1, 0x6060, net.ParseIP("172.16.1.1"), nil, 0),
 			ie.NewUEIPAddress(2, "60.60.0.50", "", 0, 0),
+			ie.NewSDFFilter("permit out udp from assigned 1234 to any 53", "", "", "", 0),
 		),
 		ie.NewFARID(1),
 	)))
 
 	forward := driver.DispatchPacket(Packet{
 		Direction: PacketDirectionUplink,
-		Payload:   encodeTestGTP(t, 0x6060, makeIPv4Packet("60.60.0.50", "8.8.8.8"), 0),
+		Payload:   encodeTestGTP(t, 0x6060, makeUDPIPv4Packet("60.60.0.50", "8.8.8.8", 1234, 53), 0),
 	})
 	require.NoError(t, forward.Err)
 	require.Equal(t, PacketActionForward, forward.Action)

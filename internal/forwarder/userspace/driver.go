@@ -1,6 +1,7 @@
 package userspace
 
 import (
+	"net"
 	"sync"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/wmnsk/go-pfcp/ie"
 
 	"github.com/free5gc/go-upf/internal/report"
+	"github.com/free5gc/go-upf/internal/logger"
 	"github.com/free5gc/go-upf/pkg/factory"
 )
 
@@ -78,6 +80,7 @@ func (d *Driver) CreatePDR(seid uint64, req *ie.IE) error {
 	defer d.mu.Unlock()
 	sess := d.ensureSessionLocked(seid)
 	sess.PDRs[rule.ID] = rule
+	logPDRRule("create", seid, rule)
 	sess.touch()
 	d.publishSnapshotLocked()
 	return nil
@@ -97,7 +100,9 @@ func (d *Driver) UpdatePDR(seid uint64, req *ie.IE) error {
 	if _, ok := sess.PDRs[rule.ID]; !ok {
 		return ErrPDRNotFound
 	}
-	sess.PDRs[rule.ID] = rule
+	merged := mergePDRRule(sess.PDRs[rule.ID], rule)
+	sess.PDRs[rule.ID] = merged
+	logPDRRule("update", seid, merged)
 	sess.touch()
 	d.publishSnapshotLocked()
 	return nil
@@ -154,10 +159,11 @@ func (d *Driver) UpdateFAR(seid uint64, req *ie.IE) error {
 		return ErrFARNotFound
 	}
 	prev := sess.FARs[rule.ID]
-	sess.FARs[rule.ID] = rule
+	merged := mergeFARRule(prev, rule)
+	sess.FARs[rule.ID] = merged
 	sess.touch()
 	d.publishSnapshotLocked()
-	d.handleFARTransitionLocked(seid, sess, prev, rule)
+	d.handleFARTransitionLocked(seid, sess, prev, merged)
 	return nil
 }
 
@@ -378,6 +384,150 @@ func (d *Driver) HandleReport(handler report.Handler) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.handler = handler
+}
+
+func mergePDRRule(prev *PDRRule, next *PDRRule) *PDRRule {
+	if prev == nil {
+		return next
+	}
+	if next == nil {
+		return prev
+	}
+
+	merged := *prev
+	merged.ID = next.ID
+	if next.Precedence != nil {
+		merged.Precedence = next.Precedence
+	}
+	if next.PDI != nil {
+		merged.PDI = mergePDI(prev.PDI, next.PDI)
+	}
+	if next.OuterHeaderRemoval != nil {
+		merged.OuterHeaderRemoval = next.OuterHeaderRemoval
+	}
+	if next.FARID != nil {
+		merged.FARID = next.FARID
+	}
+	if len(next.QERIDs) > 0 {
+		merged.QERIDs = append([]uint32(nil), next.QERIDs...)
+	}
+	if len(next.URRIDs) > 0 {
+		merged.URRIDs = append([]uint32(nil), next.URRIDs...)
+	}
+	if len(next.Raw) > 0 {
+		merged.Raw = append([]byte(nil), next.Raw...)
+	}
+	return &merged
+}
+
+func mergePDI(prev *PDI, next *PDI) *PDI {
+	if prev == nil {
+		return next
+	}
+	if next == nil {
+		return prev
+	}
+
+	merged := *prev
+	if next.SourceInterface != nil {
+		merged.SourceInterface = next.SourceInterface
+	}
+	if next.FTEID != nil {
+		merged.FTEID = next.FTEID
+	}
+	if next.NetworkInstance != "" {
+		merged.NetworkInstance = next.NetworkInstance
+	}
+	if len(next.UEIPv4) > 0 {
+		merged.UEIPv4 = append(net.IP(nil), next.UEIPv4...)
+	}
+	if len(next.SDFFilters) > 0 {
+		merged.SDFFilters = append([]string(nil), next.SDFFilters...)
+	}
+	if len(next.SDFRules) > 0 {
+		merged.SDFRules = append([]*SDFFilterRule(nil), next.SDFRules...)
+	}
+	if next.ApplicationID != "" {
+		merged.ApplicationID = next.ApplicationID
+	}
+	return &merged
+}
+
+func mergeFARRule(prev *FARRule, next *FARRule) *FARRule {
+	if prev == nil {
+		return next
+	}
+	if next == nil {
+		return prev
+	}
+
+	merged := *prev
+	merged.ID = next.ID
+	if next.ApplyAction.Flags != 0 {
+		merged.ApplyAction = next.ApplyAction
+	}
+	if next.Forwarding != nil {
+		merged.Forwarding = mergeForwardingParameters(prev.Forwarding, next.Forwarding)
+	}
+	if next.BARID != nil {
+		merged.BARID = next.BARID
+	}
+	if len(next.Raw) > 0 {
+		merged.Raw = append([]byte(nil), next.Raw...)
+	}
+	return &merged
+}
+
+func mergeForwardingParameters(prev *ForwardingParameters, next *ForwardingParameters) *ForwardingParameters {
+	if prev == nil {
+		return next
+	}
+	if next == nil {
+		return prev
+	}
+
+	merged := *prev
+	if next.DestinationInterface != nil {
+		merged.DestinationInterface = next.DestinationInterface
+	}
+	if next.NetworkInstance != "" {
+		merged.NetworkInstance = next.NetworkInstance
+	}
+	if next.OuterHeaderCreation != nil {
+		merged.OuterHeaderCreation = next.OuterHeaderCreation
+	}
+	if next.ForwardingPolicy != "" {
+		merged.ForwardingPolicy = next.ForwardingPolicy
+	}
+	if next.PFCPSMReqFlags != nil {
+		merged.PFCPSMReqFlags = next.PFCPSMReqFlags
+	}
+	return &merged
+}
+
+func logPDRRule(op string, seid uint64, rule *PDRRule) {
+	if rule == nil {
+		return
+	}
+	var teid uint32
+	var ueIP net.IP
+	var srcIf any
+	var sdf []string
+	if rule.PDI != nil {
+		if rule.PDI.SourceInterface != nil {
+			srcIf = *rule.PDI.SourceInterface
+		}
+		if rule.PDI.FTEID != nil {
+			teid = rule.PDI.FTEID.TEID
+		}
+		if len(rule.PDI.UEIPv4) > 0 {
+			ueIP = rule.PDI.UEIPv4
+		}
+		if len(rule.PDI.SDFFilters) > 0 {
+			sdf = append([]string(nil), rule.PDI.SDFFilters...)
+		}
+	}
+	logger.FwderLog.Debugf("userspace pdr %s: seid=%d pdr=%d srcIf=%v teid=%d ue=%s far=%v sdf=%v", op, seid, rule.ID, srcIf, teid, ueIP, rule.FARID, sdf)
 }
 
 func (d *Driver) Output() <-chan PacketOutcome {
