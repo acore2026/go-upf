@@ -8,11 +8,11 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/free5gc/go-upf/internal/logger"
-	upfapp "github.com/free5gc/go-upf/pkg/app"
-	"github.com/free5gc/go-upf/pkg/factory"
-	logger_util "github.com/free5gc/util/logger"
-	"github.com/free5gc/util/version"
+	"github.com/acore2026/go-upf/internal/logger"
+	upfapp "github.com/acore2026/go-upf/pkg/app"
+	"github.com/acore2026/go-upf/pkg/factory"
+	logger_util "github.com/acore2026/util/logger"
+	"github.com/acore2026/util/version"
 )
 
 func main() {

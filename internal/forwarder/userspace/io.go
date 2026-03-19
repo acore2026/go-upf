@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/free5gc/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/logger"
 )
 
 const maxPacketSize = 64 * 1024

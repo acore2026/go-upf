@@ -10,11 +10,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/free5gc/go-upf/internal/forwarder"
-	"github.com/free5gc/go-upf/internal/logger"
-	"github.com/free5gc/go-upf/internal/pfcp"
-	"github.com/free5gc/go-upf/internal/sbi"
-	"github.com/free5gc/go-upf/pkg/factory"
+	"github.com/acore2026/go-upf/internal/forwarder"
+	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/pfcp"
+	"github.com/acore2026/go-upf/internal/sbi"
+	"github.com/acore2026/go-upf/pkg/factory"
 )
 
 type UpfApp struct {

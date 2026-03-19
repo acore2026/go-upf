@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	openapimodels "github.com/free5gc/openapi/models"
+	openapimodels "github.com/acore2026/openapi/models"
 )
 
 type EventType string

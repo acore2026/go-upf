@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	upf_context "github.com/free5gc/go-upf/internal/context"
-	"github.com/free5gc/go-upf/internal/logger"
-	"github.com/free5gc/openapi/models"
-	"github.com/free5gc/openapi/nrf/NFManagement"
+	upf_context "github.com/acore2026/go-upf/internal/context"
+	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/openapi/models"
+	"github.com/acore2026/openapi/nrf/NFManagement"
 )
 
 type NrfService struct{}

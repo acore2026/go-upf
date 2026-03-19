@@ -9,7 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/wmnsk/go-pfcp/message"
 
-	logger_util "github.com/free5gc/util/logger"
+	logger_util "github.com/acore2026/util/logger"
 )
 
 type TxTransaction struct {

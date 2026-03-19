@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	sbimodels "github.com/free5gc/go-upf/internal/sbi/models"
-	"github.com/free5gc/go-upf/pkg/factory"
-	"github.com/free5gc/openapi/models"
+	sbimodels "github.com/acore2026/go-upf/internal/sbi/models"
+	"github.com/acore2026/go-upf/pkg/factory"
+	"github.com/acore2026/openapi/models"
 )
 
 var self = &UPFContext{

@@ -3,7 +3,7 @@ package forwarder
 import (
 	"github.com/wmnsk/go-pfcp/ie"
 
-	"github.com/free5gc/go-upf/internal/report"
+	"github.com/acore2026/go-upf/internal/report"
 )
 
 type Empty struct{}

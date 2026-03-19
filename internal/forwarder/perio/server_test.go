@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/free5gc/go-upf/internal/report"
+	"github.com/acore2026/go-upf/internal/report"
 )
 
 type testHandler struct{}

@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/free5gc/go-gtp5gnl"
+	"github.com/acore2026/go-gtp5gnl"
 )
 
 type Gtp5gLink struct {

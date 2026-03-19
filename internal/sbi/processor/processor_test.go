@@ -3,10 +3,10 @@ package processor
 import (
 	"testing"
 
-	upf_context "github.com/free5gc/go-upf/internal/context"
-	sbimodels "github.com/free5gc/go-upf/internal/sbi/models"
-	"github.com/free5gc/go-upf/pkg/factory"
-	openapimodels "github.com/free5gc/openapi/models"
+	upf_context "github.com/acore2026/go-upf/internal/context"
+	sbimodels "github.com/acore2026/go-upf/internal/sbi/models"
+	"github.com/acore2026/go-upf/pkg/factory"
+	openapimodels "github.com/acore2026/openapi/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

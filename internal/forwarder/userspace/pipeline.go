@@ -8,10 +8,10 @@ import (
 
 	"github.com/wmnsk/go-pfcp/ie"
 
-	"github.com/free5gc/go-upf/internal/gtpv1"
-	"github.com/free5gc/go-upf/internal/logger"
-	"github.com/free5gc/go-upf/internal/report"
-	"github.com/free5gc/go-upf/pkg/factory"
+	"github.com/acore2026/go-upf/internal/gtpv1"
+	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/report"
+	"github.com/acore2026/go-upf/pkg/factory"
 )
 
 const (

@@ -8,17 +8,17 @@ import (
 	"sync"
 	"time"
 
-	openapimodels "github.com/free5gc/openapi/models"
+	openapimodels "github.com/acore2026/openapi/models"
 	"github.com/gin-gonic/gin"
 
-	upf_context "github.com/free5gc/go-upf/internal/context"
-	"github.com/free5gc/go-upf/internal/logger"
-	"github.com/free5gc/go-upf/internal/pfcp"
-	"github.com/free5gc/go-upf/internal/sbi/consumer"
-	sbimodels "github.com/free5gc/go-upf/internal/sbi/models"
-	"github.com/free5gc/go-upf/internal/sbi/processor"
-	"github.com/free5gc/go-upf/pkg/factory"
-	logger_util "github.com/free5gc/util/logger"
+	upf_context "github.com/acore2026/go-upf/internal/context"
+	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/pfcp"
+	"github.com/acore2026/go-upf/internal/sbi/consumer"
+	sbimodels "github.com/acore2026/go-upf/internal/sbi/models"
+	"github.com/acore2026/go-upf/internal/sbi/processor"
+	"github.com/acore2026/go-upf/pkg/factory"
+	logger_util "github.com/acore2026/util/logger"
 )
 
 type Service interface {

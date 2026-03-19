@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/free5gc/go-upf/internal/forwarder"
-	"github.com/free5gc/go-upf/internal/logger"
-	logger_util "github.com/free5gc/util/logger"
+	"github.com/acore2026/go-upf/internal/forwarder"
+	"github.com/acore2026/go-upf/internal/logger"
+	logger_util "github.com/acore2026/util/logger"
 )
 
 func TestRemoteNode(t *testing.T) {

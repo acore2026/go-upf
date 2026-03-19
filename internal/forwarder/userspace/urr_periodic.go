@@ -3,7 +3,7 @@ package userspace
 import (
 	"time"
 
-	"github.com/free5gc/go-upf/internal/report"
+	"github.com/acore2026/go-upf/internal/report"
 )
 
 func (d *Driver) startPeriodicURRLoop() {

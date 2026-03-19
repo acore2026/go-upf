@@ -8,9 +8,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/wmnsk/go-pfcp/ie"
 
-	"github.com/free5gc/go-upf/internal/forwarder"
-	"github.com/free5gc/go-upf/internal/report"
-	logger_util "github.com/free5gc/util/logger"
+	"github.com/acore2026/go-upf/internal/forwarder"
+	"github.com/acore2026/go-upf/internal/report"
+	logger_util "github.com/acore2026/util/logger"
 )
 
 const (

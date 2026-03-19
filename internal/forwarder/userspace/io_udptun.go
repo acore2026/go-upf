@@ -8,8 +8,8 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/free5gc/go-upf/internal/logger"
-	"github.com/free5gc/go-upf/pkg/factory"
+	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/pkg/factory"
 	"github.com/khirono/go-nl"
 	"github.com/khirono/go-rtnllink"
 	"github.com/khirono/go-rtnlroute"

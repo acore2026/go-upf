@@ -1,13 +1,13 @@
-module github.com/free5gc/go-upf
+module github.com/acore2026/go-upf
 
 go 1.25.5
 
 require (
+	github.com/acore2026/go-gtp5gnl v1.6.2
+	github.com/acore2026/openapi v1.2.4
+	github.com/acore2026/util v1.3.2-0.20260228091348-fb7d1127055f
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
 	github.com/davecgh/go-spew v1.1.1
-	github.com/free5gc/go-gtp5gnl v1.6.1
-	github.com/free5gc/openapi v1.2.3
-	github.com/free5gc/util v1.3.2-0.20260228091348-fb7d1127055f
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.6.0
@@ -20,6 +20,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/wmnsk/go-pfcp v0.0.23-0.20231009074152-d5a9c1f47114
+	golang.org/x/sys v0.38.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -64,8 +65,21 @@ require (
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+replace (
+	github.com/acore2026/aper => /tmp/acore-repos/aper
+	github.com/acore2026/chf => /tmp/acore-repos/chf
+	github.com/acore2026/go-gtp5gnl => /tmp/acore-repos/go-gtp5gnl
+	github.com/acore2026/ike => /tmp/acore-repos/ike
+	github.com/acore2026/nas => /tmp/acore-repos/nas
+	github.com/acore2026/ngap => /tmp/acore-repos/ngap
+	github.com/acore2026/openapi => /tmp/acore-repos/openapi
+	github.com/acore2026/pfcp => /tmp/acore-repos/pfcp
+	github.com/acore2026/sctp => /tmp/acore-repos/sctp
+	github.com/acore2026/tlv => /tmp/acore-repos/tlv
+	github.com/acore2026/util => /tmp/acore-repos/util
 )

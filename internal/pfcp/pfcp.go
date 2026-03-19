@@ -12,11 +12,11 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/wmnsk/go-pfcp/message"
 
-	"github.com/free5gc/go-upf/internal/forwarder"
-	"github.com/free5gc/go-upf/internal/logger"
-	"github.com/free5gc/go-upf/internal/report"
-	"github.com/free5gc/go-upf/pkg/factory"
-	logger_util "github.com/free5gc/util/logger"
+	"github.com/acore2026/go-upf/internal/forwarder"
+	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/report"
+	"github.com/acore2026/go-upf/pkg/factory"
+	logger_util "github.com/acore2026/util/logger"
 )
 
 const (

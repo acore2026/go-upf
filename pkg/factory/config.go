@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/free5gc/openapi/models"
+	"github.com/acore2026/openapi/models"
 
-	"github.com/free5gc/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/logger"
 )
 
 const (

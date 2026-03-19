@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/free5gc/go-upf/pkg/factory"
+	"github.com/acore2026/go-upf/pkg/factory"
 )
 
 func TestStartReturnsWhenDriverInitializationFails(t *testing.T) {

@@ -4,9 +4,9 @@ import (
 	"net/url"
 	"slices"
 
-	upf_context "github.com/free5gc/go-upf/internal/context"
-	sbimodels "github.com/free5gc/go-upf/internal/sbi/models"
-	openapimodels "github.com/free5gc/openapi/models"
+	upf_context "github.com/acore2026/go-upf/internal/context"
+	sbimodels "github.com/acore2026/go-upf/internal/sbi/models"
+	openapimodels "github.com/acore2026/openapi/models"
 )
 
 type Processor struct{}

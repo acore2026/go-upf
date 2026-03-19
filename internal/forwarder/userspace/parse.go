@@ -7,8 +7,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/wmnsk/go-pfcp/ie"
 
-	"github.com/free5gc/go-upf/internal/report"
-	util_pfcp "github.com/free5gc/util/pfcp"
+	"github.com/acore2026/go-upf/internal/report"
+	util_pfcp "github.com/acore2026/util/pfcp"
 )
 
 var (
