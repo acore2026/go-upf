@@ -110,7 +110,10 @@ func (w *worker) run() {
 		case <-w.stopCh:
 			return
 		case job := <-w.queue:
-			job.resp <- w.process(job.packet)
+			result := w.process(job.packet)
+			if job.resp != nil {
+				job.resp <- result
+			}
 		}
 	}
 }

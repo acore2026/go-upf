@@ -141,7 +141,14 @@ func (b *udpTunBackend) udpReadLoop(d *Driver) {
 			d.stats.runtimeIOErrors.Add(1)
 			continue
 		}
-		_ = d.ProcessUplinkGTP(append([]byte(nil), buf[:n]...))
+		payload := append([]byte(nil), buf[:n]...)
+		if err := d.enqueuePacket(Packet{
+			Direction: PacketDirectionUplink,
+			TEID:      uplinkTEID(payload),
+			Payload:   payload,
+		}); err != nil {
+			d.stats.runtimeIOErrors.Add(1)
+		}
 	}
 }
 
@@ -156,9 +163,20 @@ func (b *udpTunBackend) tunReadLoop(d *Driver) {
 			d.stats.runtimeIOErrors.Add(1)
 			continue
 		}
-		result := d.ProcessDownlinkIP(append([]byte(nil), buf[:n]...))
-		if errors.Is(result.Err, errUnsupportedDownlinkPayload) {
+		payload := append([]byte(nil), buf[:n]...)
+		ueIP := downlinkUEIP(payload)
+		if ueIP == nil {
+			if !errors.Is(d.ProcessDownlinkIP(payload).Err, errUnsupportedDownlinkPayload) {
+				d.stats.runtimeIOErrors.Add(1)
+			}
 			continue
+		}
+		if err := d.enqueuePacket(Packet{
+			Direction: PacketDirectionDownlink,
+			UEIP:      ueIP,
+			Payload:   payload,
+		}); err != nil {
+			d.stats.runtimeIOErrors.Add(1)
 		}
 	}
 }

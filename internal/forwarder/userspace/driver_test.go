@@ -563,7 +563,7 @@ func TestQERMBRLimitsImmediateBurst(t *testing.T) {
 	require.NoError(t, driver.CreateQER(32, ie.NewCreateQER(
 		ie.NewQERID(5),
 		ie.NewGateStatus(ie.GateStatusOpen, ie.GateStatusOpen),
-		ie.NewMBR(232, 0),
+		ie.NewMBR(3, 0),
 	)))
 	require.NoError(t, driver.CreatePDR(32, ie.NewCreatePDR(
 		ie.NewPDRID(1),
@@ -578,7 +578,7 @@ func TestQERMBRLimitsImmediateBurst(t *testing.T) {
 		ie.NewQERID(5),
 	)))
 
-	payload := makeIPv4Packet("60.60.0.32", "8.8.8.8")
+	payload := makeUDPIPv4PacketWithPayload("60.60.0.32", "8.8.8.8", 1234, 53, 256)
 	first := driver.DispatchPacket(Packet{
 		Direction: PacketDirectionUplink,
 		Payload:   encodeTestGTP(t, 0x5555, payload, 0),
@@ -882,7 +882,7 @@ func TestQERMBRLimitsBurstTraffic(t *testing.T) {
 	require.NoError(t, driver.CreateQER(41, ie.NewCreateQER(
 		ie.NewQERID(1),
 		ie.NewGateStatus(ie.GateStatusOpen, ie.GateStatusOpen),
-		ie.NewMBR(232, 232),
+		ie.NewMBR(3, 3),
 	)))
 	require.NoError(t, driver.CreatePDR(41, ie.NewCreatePDR(
 		ie.NewPDRID(1),
@@ -896,7 +896,7 @@ func TestQERMBRLimitsBurstTraffic(t *testing.T) {
 		ie.NewQERID(1),
 	)))
 
-	packet := encodeTestGTP(t, 0x5151, makeIPv4Packet("60.60.0.41", "8.8.8.8"), 0)
+	packet := encodeTestGTP(t, 0x5151, makeUDPIPv4PacketWithPayload("60.60.0.41", "8.8.8.8", 1234, 53, 256), 0)
 	first := driver.DispatchPacket(Packet{
 		Direction: PacketDirectionUplink,
 		Payload:   packet,
@@ -1033,9 +1033,13 @@ func makeIPv4Packet(src string, dst string) []byte {
 }
 
 func makeUDPIPv4Packet(src string, dst string, srcPort uint16, dstPort uint16) []byte {
-	packet := make([]byte, 28)
+	return makeUDPIPv4PacketWithPayload(src, dst, srcPort, dstPort, 0)
+}
+
+func makeUDPIPv4PacketWithPayload(src string, dst string, srcPort uint16, dstPort uint16, payloadLen int) []byte {
+	packet := make([]byte, 28+payloadLen)
 	packet[0] = 0x45
-	packet[2] = 0
+	packet[2] = byte(len(packet) >> 8)
 	packet[3] = byte(len(packet))
 	packet[8] = 64
 	packet[9] = 17

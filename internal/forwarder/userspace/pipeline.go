@@ -307,7 +307,8 @@ func (d *Driver) forwardBufferedPayload(binding *PDRBinding, payload []byte) (*P
 func (d *Driver) publishOutcome(outcome *PacketOutcome) {
 	select {
 	case d.egressCh <- *outcome:
-	default:
+	case <-d.stopCh:
+		return
 	}
 	select {
 	case d.outputCh <- *outcome:

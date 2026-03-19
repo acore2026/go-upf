@@ -280,18 +280,50 @@ func (d *Driver) DispatchPacket(packet Packet) PacketResult {
 	return <-resp
 }
 
+func (d *Driver) enqueuePacket(packet Packet) error {
+	if len(d.workers) == 0 {
+		return errNoWorkers
+	}
+
+	worker := d.workers[d.workerIndexFor(packet)]
+	select {
+	case <-d.stopCh:
+		return errNoWorkers
+	case worker.queue <- packetJob{packet: packet}:
+		return nil
+	}
+}
+
 func (d *Driver) ProcessUplinkGTP(payload []byte) PacketResult {
 	return d.DispatchPacket(Packet{
 		Direction: PacketDirectionUplink,
+		TEID:      uplinkTEID(payload),
 		Payload:   payload,
 	})
 }
 
 func (d *Driver) ProcessDownlinkIP(payload []byte) PacketResult {
+	ueIP := downlinkUEIP(payload)
 	return d.DispatchPacket(Packet{
 		Direction: PacketDirectionDownlink,
+		UEIP:      ueIP,
 		Payload:   payload,
 	})
+}
+
+func uplinkTEID(payload []byte) uint32 {
+	if len(payload) < 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint32(payload[4:8])
+}
+
+func downlinkUEIP(payload []byte) net.IP {
+	meta, err := parseIPv4PacketMeta(payload)
+	if err != nil {
+		return nil
+	}
+	return meta.DstIP
 }
 
 func (d *Driver) workerIndexFor(packet Packet) int {

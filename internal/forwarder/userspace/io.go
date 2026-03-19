@@ -31,7 +31,10 @@ func (d *Driver) startRuntime(opts options) error {
 	}
 
 	rio.start(d)
-	d.startLoop(d.egressLoop)
+	egressLoops := max(1, len(d.workers))
+	for i := 0; i < egressLoops; i++ {
+		d.startLoop(d.egressLoop)
+	}
 	return nil
 }
 

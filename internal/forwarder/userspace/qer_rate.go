@@ -66,7 +66,8 @@ func selectQERBucket(meter *QERMeterState, direction PacketDirection) *tokenBuck
 }
 
 func consumeTokens(bucket *tokenBucket, mbrBitsPerSecond uint64, bytes int, now time.Time) bool {
-	rateBytesPerSecond := float64(mbrBitsPerSecond) / 8.0
+	// PFCP MBR/GBR values are encoded in kilobits per second.
+	rateBytesPerSecond := (float64(mbrBitsPerSecond) * 1000.0) / 8.0
 	if rateBytesPerSecond <= 0 {
 		return true
 	}
