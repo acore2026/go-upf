@@ -1,3 +1,9 @@
+github.com/acore2026/go-gtp5gnl v1.6.2 h1:V1f59eIRLE+eFVMFXyjpWOtrE9i2vHOzxkNph6xaBto=
+github.com/acore2026/go-gtp5gnl v1.6.2/go.mod h1:Nht5KW0mNXPwRQJoTP3ve/lH0spCmSS6lGEsDzv+dQY=
+github.com/acore2026/openapi v1.2.4 h1:/VJ7JqSrtXYd4YLLneuaqP44GpoP68f2yjxOdwK77Vk=
+github.com/acore2026/openapi v1.2.4/go.mod h1:BkF9PK4MadF5/TijOlIllPRTzqWMCZUfqDKU1g+fHJo=
+github.com/acore2026/util v1.3.2 h1:vvz+z3tWmbkxyz0/k3FIH7SvRVFrlilDpNKZTNsRheM=
+github.com/acore2026/util v1.3.2/go.mod h1:ueonzQ1Fwm/LkKYNdPVtEQv1wCD/m/NlSy+xXPa2bm8=
 github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d h1:Byv0BzEl3/e6D5CLfI0j/7hiIEtvGVFPCZ7Ei2oq8iQ=
 github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d/go.mod h1:WaHUgvxTVq04UNunO+XhnAqY/wQc+bxr74GqbsZ/Jqw=
 github.com/bytedance/sonic v1.11.6 h1:oUp34TzMlL+OY1OUWxHqsdkgC/Zfc85zGqw9siXjrc0=
