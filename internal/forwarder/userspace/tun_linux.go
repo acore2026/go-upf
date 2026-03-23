@@ -32,6 +32,10 @@ func openTUN(name string) (tunDevice, error) {
 		_ = unix.Close(fd)
 		return nil, errno
 	}
+	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.TUNSETOFFLOAD), uintptr(unix.TUN_F_CSUM)); errno != 0 {
+		_ = unix.Close(fd)
+		return nil, errno
+	}
 
 	actualName := string(ifr[:unix.IFNAMSIZ])
 	for idx, c := range actualName {

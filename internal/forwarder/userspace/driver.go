@@ -8,18 +8,20 @@ import (
 	"github.com/pkg/errors"
 	"github.com/wmnsk/go-pfcp/ie"
 
-	"github.com/acore2026/go-upf/internal/report"
 	"github.com/acore2026/go-upf/internal/logger"
+	"github.com/acore2026/go-upf/internal/report"
 	"github.com/acore2026/go-upf/pkg/factory"
 )
 
 type Driver struct {
-	mu         sync.RWMutex
-	sessions   map[uint64]*SessionState
-	handler    report.Handler
-	snapshot   snapshotHolder
-	stats      *statsTracker
-	pendingDDN map[ddnKey]*pendingDDNNotification
+	mu            sync.RWMutex
+	sessions      map[uint64]*SessionState
+	handler       report.Handler
+	snapshot      snapshotHolder
+	stats         *statsTracker
+	pendingDDN    map[ddnKey]*pendingDDNNotification
+	adaptiveQoS   *adaptiveQoSController
+	adaptiveTrace *adaptiveTraceBuffer
 
 	workers  []*worker
 	egressCh chan PacketOutcome
@@ -39,20 +41,28 @@ func New(wg *sync.WaitGroup, cfg *factory.Config) (*Driver, error) {
 
 	opts := optionsFromConfig(cfg)
 	d := &Driver{
-		sessions:   make(map[uint64]*SessionState),
-		snapshot:   newSnapshotHolder(),
-		stats:      newStatsTracker(),
-		pendingDDN: make(map[ddnKey]*pendingDDNNotification),
-		egressCh:   make(chan PacketOutcome, max(1, opts.queueSize*opts.workers)),
-		outputCh:   make(chan PacketOutcome, max(1, opts.queueSize*opts.workers)),
-		stopCh:     make(chan struct{}),
-		wg:         wg,
+		sessions:      make(map[uint64]*SessionState),
+		snapshot:      newSnapshotHolder(),
+		stats:         newStatsTracker(),
+		pendingDDN:    make(map[ddnKey]*pendingDDNNotification),
+		adaptiveTrace: newAdaptiveTraceBuffer(adaptiveDefaultTraceLimit),
+		egressCh:      make(chan PacketOutcome, max(1, opts.queueSize*opts.workers)),
+		outputCh:      make(chan PacketOutcome, max(1, opts.queueSize*opts.workers)),
+		stopCh:        make(chan struct{}),
+		wg:            wg,
 	}
+	d.adaptiveQoS = newAdaptiveQoSController(d, cfg)
 	d.startWorkers(opts)
 	d.startPeriodicURRLoop()
 	if err := d.startRuntime(opts); err != nil {
 		d.Close()
-		return nil, err
+		return nil, errors.Wrap(err, "start runtime")
+	}
+	if d.adaptiveQoS != nil {
+		if err := d.adaptiveQoS.start(); err != nil {
+			d.Close()
+			return nil, errors.Wrap(err, "start adaptive qos")
+		}
 	}
 	return d, nil
 }
@@ -60,10 +70,13 @@ func New(wg *sync.WaitGroup, cfg *factory.Config) (*Driver, error) {
 func (d *Driver) Close() {
 	d.once.Do(func() {
 		close(d.stopCh)
-		d.stopPendingDDN()
 		if d.io != nil {
 			d.io.close()
 		}
+		if d.adaptiveQoS != nil {
+			d.adaptiveQoS.close()
+		}
+		d.stopPendingDDN()
 		d.ioWg.Wait()
 		d.workerWg.Wait()
 		close(d.egressCh)

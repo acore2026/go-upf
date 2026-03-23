@@ -131,9 +131,13 @@ func (b *udpTunBackend) start(d *Driver) {
 }
 
 func (b *udpTunBackend) udpReadLoop(d *Driver) {
+	udp := b.udp
+	if udp == nil {
+		return
+	}
 	buf := make([]byte, maxPacketSize)
 	for {
-		n, _, err := b.udp.ReadFromUDP(buf)
+		n, _, err := udp.ReadFromUDP(buf)
 		if err != nil {
 			if d.isRuntimeClosed(err) {
 				return
@@ -153,9 +157,13 @@ func (b *udpTunBackend) udpReadLoop(d *Driver) {
 }
 
 func (b *udpTunBackend) tunReadLoop(d *Driver) {
+	tun := b.tun
+	if tun == nil {
+		return
+	}
 	buf := make([]byte, maxPacketSize)
 	for {
-		n, err := b.tun.Read(buf)
+		n, err := tun.Read(buf)
 		if err != nil {
 			if d.isRuntimeClosed(err) {
 				return
@@ -164,9 +172,16 @@ func (b *udpTunBackend) tunReadLoop(d *Driver) {
 			continue
 		}
 		payload := append([]byte(nil), buf[:n]...)
+		if meta, err := parseIPv4PacketMeta(payload); err == nil {
+			logger.FwderLog.Debugf("userspace tun read: bytes=%d src=%s dst=%s proto=%d", len(payload), meta.SrcIP, meta.DstIP, meta.Protocol)
+		} else {
+			logger.FwderLog.Debugf("userspace tun read: bytes=%d non-ipv4 err=%v", len(payload), err)
+		}
 		ueIP := downlinkUEIP(payload)
 		if ueIP == nil {
-			if !errors.Is(d.ProcessDownlinkIP(payload).Err, errUnsupportedDownlinkPayload) {
+			result := d.ProcessDownlinkIP(payload)
+			if !errors.Is(result.Err, errUnsupportedDownlinkPayload) {
+				logger.FwderLog.Debugf("userspace tun fallback: bytes=%d err=%v", len(payload), result.Err)
 				d.stats.runtimeIOErrors.Add(1)
 			}
 			continue

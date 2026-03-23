@@ -69,7 +69,7 @@ func (d *Driver) processUplink(packet Packet, result PacketResult) PacketResult 
 		return result
 	}
 	result.Action = resolveAction(result.Binding)
-	if gateClosed(result.Binding, PacketDirectionUplink) {
+	if d.gateClosed(result.Binding, PacketDirectionUplink) {
 		result.Action = PacketActionDrop
 	}
 	if result.Action == PacketActionForward && !d.mbrAllows(result.Binding, len(decoded.InnerPayload), PacketDirectionUplink) {
@@ -78,6 +78,11 @@ func (d *Driver) processUplink(packet Packet, result PacketResult) PacketResult 
 
 	switch result.Action {
 	case PacketActionForward:
+		if d.adaptiveQoS != nil && d.adaptiveQoS.InterceptUplink(decoded.InnerPayload) {
+			logger.FwderLog.Debugf("userspace uplink intercepted by adaptive QoS: teid=%d pdr=%d seid=%d ue=%s dst=%s", decoded.TEID, result.Binding.PDR.ID, result.Binding.SEID, ueIP, meta.DstIP)
+			d.stats.forwardedPackets.Add(1)
+			break
+		}
 		outcome, err := d.forwardUplink(result.Binding, decoded.InnerPayload)
 		if err != nil {
 			logger.FwderLog.Debugf("userspace uplink forward error: teid=%d pdr=%d err=%v", decoded.TEID, result.Binding.PDR.ID, err)
@@ -134,7 +139,7 @@ func (d *Driver) processDownlink(packet Packet, result PacketResult) PacketResul
 		return result
 	}
 	result.Action = resolveAction(result.Binding)
-	if gateClosed(result.Binding, PacketDirectionDownlink) {
+	if d.gateClosed(result.Binding, PacketDirectionDownlink) {
 		result.Action = PacketActionDrop
 	}
 	if result.Action == PacketActionForward && !d.mbrAllows(result.Binding, len(packet.Payload), PacketDirectionDownlink) {
@@ -278,7 +283,7 @@ func (d *Driver) handleFARTransitionLocked(seid uint64, sess *SessionState, prev
 			}
 		}
 		if matched == nil {
-			matched = buildRuntimeSnapshot(d.sessions).Downlink[pdr.PDI.UEIPv4.String()][0]
+			matched = buildRuntimeSnapshot(d.sessions, nil).Downlink[pdr.PDI.UEIPv4.String()][0]
 		}
 
 		switch {
@@ -466,20 +471,13 @@ func firstQFI(qers []*QERRule) uint8 {
 	return 0
 }
 
-func gateClosed(binding *PDRBinding, direction PacketDirection) bool {
+func (d *Driver) gateClosed(binding *PDRBinding, direction PacketDirection) bool {
 	for _, qer := range binding.QERs {
-		if qer == nil || qer.GateStatus == nil {
+		if qer == nil {
 			continue
 		}
-		switch direction {
-		case PacketDirectionUplink:
-			if *qer.GateStatus&qerULGateClosed != 0 {
-				return true
-			}
-		case PacketDirectionDownlink:
-			if *qer.GateStatus&qerDLGateClosed != 0 {
-				return true
-			}
+		if d.effectiveQERGateClosed(binding, qer, direction) {
+			return true
 		}
 	}
 	return false

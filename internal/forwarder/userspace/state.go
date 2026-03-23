@@ -112,7 +112,11 @@ func (w *worker) run() {
 		case job := <-w.queue:
 			result := w.process(job.packet)
 			if job.resp != nil {
-				job.resp <- result
+				select {
+				case <-w.stopCh:
+					return
+				case job.resp <- result:
+				}
 			}
 		}
 	}
@@ -152,32 +156,36 @@ func (w *worker) process(packet Packet) PacketResult {
 }
 
 type SessionState struct {
-	SEID        uint64
-	PDRs        map[uint16]*PDRRule
-	FARs        map[uint32]*FARRule
-	QERs        map[uint32]*QERRule
-	QERMeters   map[uint32]*QERMeterState
-	URRs        map[uint32]*URRRule
-	URRPeriodAt map[uint32]time.Time
-	BARs        map[uint8]*BARRule
-	Buffers     map[uint16][][]byte
-	URRReports  map[uint32][]report.USAReport
-	UpdatedAt   time.Time
+	SEID          uint64
+	PDRs          map[uint16]*PDRRule
+	FARs          map[uint32]*FARRule
+	QERs          map[uint32]*QERRule
+	QERMeters     map[uint32]*QERMeterState
+	AdaptiveQER   map[string]*AdaptiveQEROverride
+	URRs          map[uint32]*URRRule
+	URRPeriodAt   map[uint32]time.Time
+	BARs          map[uint8]*BARRule
+	Buffers       map[uint16][][]byte
+	URRReports    map[uint32][]report.USAReport
+	AdaptiveFlows map[string]*AdaptiveFlowState
+	UpdatedAt     time.Time
 }
 
 func NewSessionState(seid uint64) *SessionState {
 	return &SessionState{
-		SEID:        seid,
-		PDRs:        make(map[uint16]*PDRRule),
-		FARs:        make(map[uint32]*FARRule),
-		QERs:        make(map[uint32]*QERRule),
-		QERMeters:   make(map[uint32]*QERMeterState),
-		URRs:        make(map[uint32]*URRRule),
-		URRPeriodAt: make(map[uint32]time.Time),
-		BARs:        make(map[uint8]*BARRule),
-		Buffers:     make(map[uint16][][]byte),
-		URRReports:  make(map[uint32][]report.USAReport),
-		UpdatedAt:   time.Now().UTC(),
+		SEID:          seid,
+		PDRs:          make(map[uint16]*PDRRule),
+		FARs:          make(map[uint32]*FARRule),
+		QERs:          make(map[uint32]*QERRule),
+		QERMeters:     make(map[uint32]*QERMeterState),
+		AdaptiveQER:   make(map[string]*AdaptiveQEROverride),
+		URRs:          make(map[uint32]*URRRule),
+		URRPeriodAt:   make(map[uint32]time.Time),
+		BARs:          make(map[uint8]*BARRule),
+		Buffers:       make(map[uint16][][]byte),
+		URRReports:    make(map[uint32][]report.USAReport),
+		AdaptiveFlows: make(map[string]*AdaptiveFlowState),
+		UpdatedAt:     time.Now().UTC(),
 	}
 }
 

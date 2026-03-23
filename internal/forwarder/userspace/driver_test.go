@@ -1,11 +1,24 @@
 package userspace
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	masque "github.com/quic-go/masque-go"
+	"github.com/quic-go/quic-go/http3"
 	"github.com/stretchr/testify/require"
 	"github.com/wmnsk/go-pfcp/ie"
 
@@ -45,6 +58,49 @@ func TestNewStartsConfiguredWorkers(t *testing.T) {
 
 	driver.Close()
 	wg.Wait()
+}
+
+func TestNewStartsAdaptiveQoSControllerWhenEnabled(t *testing.T) {
+	certFile, keyFile, certPool := writeAdaptiveQoSTestCerts(t)
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+				GNBControl: &factory.AdaptiveQoSGNBControl{
+					Addr: "127.0.0.2",
+					Port: 2152,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NotNil(t, driver.adaptiveQoS)
+	require.True(t, driver.adaptiveQoS.Running())
+	require.NotNil(t, driver.adaptiveQoS.Template())
+	require.Equal(t, certFile, driver.adaptiveQoS.certFile)
+	require.Equal(t, keyFile, driver.adaptiveQoS.keyFile)
+	require.NotNil(t, certPool)
+}
+
+func TestNewWithoutAdaptiveQoSLeavesControllerDisabled(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.Nil(t, driver.adaptiveQoS)
 }
 
 func TestRuleLifecycle(t *testing.T) {
@@ -91,6 +147,33 @@ func TestRuleLifecycle(t *testing.T) {
 	driver.mu.RUnlock()
 }
 
+func TestSessionStateInitializesAdaptiveMaps(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	err = driver.CreateFAR(1, ie.NewCreateFAR(
+		ie.NewFARID(9),
+		ie.NewApplyAction(0x2),
+	))
+	require.NoError(t, err)
+	err = driver.CreatePDR(1, ie.NewCreatePDR(
+		ie.NewPDRID(7),
+		ie.NewPrecedence(255),
+		ie.NewPDI(ie.NewSourceInterface(ie.SrcInterfaceAccess)),
+		ie.NewOuterHeaderRemoval(0, 0),
+		ie.NewFARID(9),
+	))
+	require.NoError(t, err)
+
+	driver.mu.RLock()
+	sess := driver.sessions[1]
+	driver.mu.RUnlock()
+	require.NotNil(t, sess)
+	require.NotNil(t, sess.AdaptiveFlows)
+	require.NotNil(t, sess.AdaptiveQER)
+}
+
 func TestQERStoresPFCPFieldsConsistently(t *testing.T) {
 	driver, err := New(nil, newUserspaceConfig(1))
 	require.NoError(t, err)
@@ -129,6 +212,351 @@ func TestQERStoresPFCPFieldsConsistently(t *testing.T) {
 	require.EqualValues(t, 1, *qer.RQI)
 	require.NotNil(t, qer.PPI)
 	require.EqualValues(t, 7, *qer.PPI)
+}
+
+func TestAdaptiveQEROverrideClosesGate(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateQER(77, ie.NewCreateQER(
+		ie.NewQERID(5),
+		ie.NewGateStatus(ie.GateStatusOpen, ie.GateStatusOpen),
+	)))
+
+	driver.mu.Lock()
+	driver.sessions[77].AdaptiveQER[adaptiveQERKey(5)] = &AdaptiveQEROverride{
+		FlowID:         "flow-1",
+		ApplyToQERID:   5,
+		OverrideGateUL: boolPtr(false),
+		ExpiresAt:      time.Now().UTC().Add(time.Minute),
+	}
+	binding := &PDRBinding{
+		SEID: 77,
+		QERs: []*QERRule{driver.sessions[77].QERs[5]},
+	}
+	driver.mu.Unlock()
+
+	require.True(t, driver.gateClosed(binding, PacketDirectionUplink))
+	require.False(t, driver.gateClosed(binding, PacketDirectionDownlink))
+}
+
+func TestAdaptiveQEROverrideMBRTakesPrecedence(t *testing.T) {
+	driver, err := New(nil, newUserspaceConfig(1))
+	require.NoError(t, err)
+	defer driver.Close()
+
+	require.NoError(t, driver.CreateQER(88, ie.NewCreateQER(
+		ie.NewQERID(6),
+		ie.NewMBR(500000, 400000),
+	)))
+
+	driver.mu.Lock()
+	driver.sessions[88].AdaptiveQER[adaptiveQERKey(6)] = &AdaptiveQEROverride{
+		FlowID:        "flow-2",
+		ApplyToQERID:  6,
+		OverrideMBRUL: 123000,
+		OverrideMBRDL: 456000,
+		ExpiresAt:     time.Now().UTC().Add(time.Minute),
+	}
+	binding := &PDRBinding{
+		SEID: 88,
+		QERs: []*QERRule{driver.sessions[88].QERs[6]},
+	}
+	driver.mu.Unlock()
+
+	require.EqualValues(t, 123000, driver.effectiveQERMBR(binding, binding.QERs[0], PacketDirectionUplink))
+	require.EqualValues(t, 456000, driver.effectiveQERMBR(binding, binding.QERs[0], PacketDirectionDownlink))
+}
+
+func TestAdaptiveQoSMASQUETunnelCarriesReportAndFeedback(t *testing.T) {
+	certFile, keyFile, certPool := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+	seedAdaptiveSession(t, driver, 42, "60.60.0.42", 9)
+
+	template := driver.adaptiveQoS.Template()
+	require.NotNil(t, template)
+	targetAddr := driver.adaptiveQoS.ReportTargetAddr()
+	require.NotNil(t, targetAddr)
+
+	client := masque.Client{
+		TLSClientConfig: &tls.Config{
+			RootCAs:            certPool,
+			ServerName:         "localhost",
+			NextProtos:         []string{http3.NextProtoH3},
+			InsecureSkipVerify: true,
+		},
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, rsp, err := client.Dial(ctx, template, targetAddr)
+	require.NoError(t, err)
+	require.Equal(t, 200, rsp.StatusCode)
+	defer conn.Close()
+
+	reqPayload, err := json.Marshal(AdaptiveReport{
+		UEAddress:           "60.60.0.42",
+		FlowID:              "flow-123",
+		ReportType:          AdaptiveReportTypeIntent,
+		Timestamp:           time.Now().UTC(),
+		LatencySensitivity:  "high",
+		TrafficPattern:      "periodic",
+		PacketLossTolerance: "low",
+	})
+	require.NoError(t, err)
+	_, err = conn.WriteTo(reqPayload, nil)
+	require.NoError(t, err)
+
+	buf := make([]byte, 1024)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+	n, _, err := conn.ReadFrom(buf)
+	require.NoError(t, err)
+	var feedback AdaptiveFeedback
+	require.NoError(t, json.Unmarshal(buf[:n], &feedback))
+	require.Equal(t, "flow-123", feedback.FlowID)
+	require.Equal(t, AdaptiveFeedbackStatusStarted, feedback.Status)
+	require.Equal(t, "ACCEPTED", feedback.ReasonCode)
+}
+
+func TestApplyAdaptiveReportBindsByUEAddressAndOverridesQER(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+				Authorization: &factory.AdaptiveQoSAuthorization{
+					DefaultProfileDuration: time.Minute,
+					MaxBitrateUL:           200000,
+					MaxBitrateDL:           300000,
+				},
+				Rules: []factory.AdaptiveQoSRule{
+					{
+						Name:               "low-latency",
+						TrafficPattern:     "periodic",
+						LatencySensitivity: "high",
+						OverrideGateUL:     boolPtr(true),
+						OverrideGateDL:     boolPtr(true),
+						OverrideMBRUL:      150000,
+						OverrideMBRDL:      250000,
+						Duration:           45 * time.Second,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+
+	seedAdaptiveSession(t, driver, 101, "60.60.0.101", 7)
+
+	now := time.Now().UTC()
+	feedback := driver.applyAdaptiveReport(AdaptiveReport{
+		UEAddress:           "60.60.0.101",
+		FlowID:              "flow-a",
+		ReportType:          AdaptiveReportTypeIntent,
+		Timestamp:           now,
+		TrafficPattern:      "periodic",
+		LatencySensitivity:  "high",
+		PacketLossTolerance: "low",
+	}, now)
+
+	require.Equal(t, AdaptiveFeedbackStatusStarted, feedback.Status)
+	require.Equal(t, "ACCEPTED", feedback.ReasonCode)
+
+	driver.mu.RLock()
+	defer driver.mu.RUnlock()
+	sess := driver.sessions[101]
+	require.NotNil(t, sess)
+	flow := sess.AdaptiveFlows["flow-a"]
+	require.NotNil(t, flow)
+	require.Equal(t, "60.60.0.101", flow.UEAddress)
+	require.Equal(t, []uint32{7}, flow.AppliedQERIDs)
+	require.NotNil(t, flow.SelectedProfile)
+	require.Equal(t, "low-latency", flow.SelectedProfile.ProfileID)
+	override := sess.AdaptiveQER[adaptiveQERKey(7)]
+	require.NotNil(t, override)
+	require.NotNil(t, override.OverrideGateUL)
+	require.True(t, *override.OverrideGateUL)
+	require.NotNil(t, override.OverrideGateDL)
+	require.True(t, *override.OverrideGateDL)
+	require.EqualValues(t, 150000, override.OverrideMBRUL)
+	require.EqualValues(t, 250000, override.OverrideMBRDL)
+}
+
+func TestApplyAdaptiveReportPredictiveBurstReturnsStoryFeedback(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+
+	seedAdaptiveSession(t, driver, 103, "60.60.0.103", 9)
+
+	now := time.Now().UTC()
+	feedback := driver.applyAdaptiveReport(AdaptiveReport{
+		UEAddress:       "60.60.0.103",
+		FlowID:          "story1-flow",
+		ReportType:      AdaptiveReportTypeIntent,
+		Timestamp:       now,
+		Scenario:        "predictive-burst",
+		TrafficPattern:  "burst",
+		BurstSize:       6 << 20,
+		BurstDurationMs: 120,
+		DeadlineMs:      150,
+	}, now)
+
+	require.Equal(t, AdaptiveFeedbackStatusStarted, feedback.Status)
+	require.Equal(t, "burst-protect", feedback.ProfileID)
+	require.Equal(t, "predictive-burst", feedback.Scenario)
+	require.Equal(t, "prepared", feedback.StoryPhase)
+	require.Equal(t, "ACCEPTED", feedback.GNBDecision)
+	require.EqualValues(t, 8, feedback.PredictedAirDelayMs)
+	require.InDelta(t, 0.99, feedback.BlockSuccessRatio, 0.001)
+
+	story := driver.currentStoryView()
+	require.NotNil(t, story)
+	require.Equal(t, "predictive-burst", story.Scenario)
+	require.Equal(t, "story1-flow", story.FlowID)
+	require.Equal(t, "burst-protect", story.ProfileID)
+}
+
+func TestApplyAdaptiveReportEndClearsOverrides(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+
+	seedAdaptiveSession(t, driver, 102, "60.60.0.102", 8)
+	now := time.Now().UTC()
+
+	started := driver.applyAdaptiveReport(AdaptiveReport{
+		UEAddress:          "60.60.0.102",
+		FlowID:             "flow-b",
+		ReportType:         AdaptiveReportTypeIntent,
+		Timestamp:          now,
+		LatencySensitivity: "high",
+	}, now)
+	require.Equal(t, AdaptiveFeedbackStatusStarted, started.Status)
+
+	ended := driver.applyAdaptiveReport(AdaptiveReport{
+		FlowID:     "flow-b",
+		ReportType: AdaptiveReportTypeEnd,
+		Timestamp:  now.Add(time.Second),
+	}, now.Add(time.Second))
+	require.Equal(t, AdaptiveFeedbackStatusEnded, ended.Status)
+	require.Equal(t, "ENDED", ended.ReasonCode)
+
+	driver.mu.RLock()
+	defer driver.mu.RUnlock()
+	sess := driver.sessions[102]
+	require.NotNil(t, sess)
+	require.Nil(t, sess.AdaptiveFlows["flow-b"])
+	require.Nil(t, sess.AdaptiveQER[adaptiveQERKey(8)])
+}
+
+func TestApplyAdaptiveReportRejectsAmbiguousSessionWithoutHint(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+
+	seedAdaptiveSession(t, driver, 201, "60.60.0.201", 11)
+	seedAdaptiveSession(t, driver, 202, "60.60.0.202", 12)
+
+	feedback := driver.applyAdaptiveReport(AdaptiveReport{
+		FlowID:     "flow-c",
+		ReportType: AdaptiveReportTypeIntent,
+		Timestamp:  time.Now().UTC(),
+	}, time.Now().UTC())
+	require.Equal(t, AdaptiveFeedbackStatusRejected, feedback.Status)
+	require.Equal(t, "SESSION_HINT_REQUIRED", feedback.ReasonCode)
 }
 
 func TestSnapshotIndexesAndClassification(t *testing.T) {
@@ -1026,6 +1454,75 @@ func newUserspaceConfig(workers int) *factory.Config {
 			},
 		},
 	}
+}
+
+func seedAdaptiveSession(t *testing.T, driver *Driver, seid uint64, ueAddr string, qerID uint32) {
+	t.Helper()
+
+	require.NoError(t, driver.CreateQER(seid, ie.NewCreateQER(
+		ie.NewQERID(qerID),
+		ie.NewGateStatus(ie.GateStatusOpen, ie.GateStatusOpen),
+		ie.NewMBR(500000, 400000),
+	)))
+	require.NoError(t, driver.CreatePDR(seid, ie.NewCreatePDR(
+		ie.NewPDRID(1),
+		ie.NewPrecedence(100),
+		ie.NewPDI(
+			ie.NewSourceInterface(ie.SrcInterfaceAccess),
+			ie.NewFTEID(1, uint32(seid), net.ParseIP("172.16.0.1"), nil, 0),
+			ie.NewUEIPAddress(2, ueAddr, "", 0, 0),
+		),
+		ie.NewQERID(qerID),
+	)))
+}
+
+func writeAdaptiveQoSTestCerts(t *testing.T) (string, string, *x509.CertPool) {
+	t.Helper()
+
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2019),
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	leafTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "localhost",
+		},
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(24 * time.Hour),
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+	}
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "adaptive-qos.pem")
+	keyFile := filepath.Join(dir, "adaptive-qos.key")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}), 0o600))
+	require.NoError(t, os.WriteFile(certFile+".ca", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0o600))
+	keyDER := x509.MarshalPKCS1PrivateKey(leafKey)
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER}), 0o600))
+
+	pool := x509.NewCertPool()
+	pool.AddCert(caCert)
+	return certFile, keyFile, pool
 }
 
 func makeIPv4Packet(src string, dst string) []byte {

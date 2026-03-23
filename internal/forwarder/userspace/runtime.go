@@ -14,10 +14,11 @@ import (
 )
 
 type RuntimeSnapshot struct {
-	GeneratedAt time.Time
-	Sessions    map[uint64]*SessionState
-	Uplink      map[uint32][]*PDRBinding
-	Downlink    map[string][]*PDRBinding
+	GeneratedAt   time.Time
+	Sessions      map[uint64]*SessionState
+	Uplink        map[uint32][]*PDRBinding
+	Downlink      map[string][]*PDRBinding
+	AdaptiveTrace []AdaptiveTraceEvent
 }
 
 type PDRBinding struct {
@@ -50,6 +51,9 @@ func cloneSessionState(sess *SessionState) *SessionState {
 	for id, rule := range sess.QERs {
 		cp.QERs[id] = rule
 	}
+	for key, rule := range sess.AdaptiveQER {
+		cp.AdaptiveQER[key] = rule
+	}
 	for id, rule := range sess.URRs {
 		cp.URRs[id] = rule
 	}
@@ -62,11 +66,15 @@ func cloneSessionState(sess *SessionState) *SessionState {
 	for id, reports := range sess.URRReports {
 		cp.URRReports[id] = append([]report.USAReport(nil), reports...)
 	}
+	for key, flow := range sess.AdaptiveFlows {
+		cp.AdaptiveFlows[key] = flow
+	}
 	return cp
 }
 
-func buildRuntimeSnapshot(sessions map[uint64]*SessionState) *RuntimeSnapshot {
+func buildRuntimeSnapshot(sessions map[uint64]*SessionState, trace []AdaptiveTraceEvent) *RuntimeSnapshot {
 	snapshot := newRuntimeSnapshot()
+	snapshot.AdaptiveTrace = append(snapshot.AdaptiveTrace, trace...)
 
 	for seid, sess := range sessions {
 		snapshot.Sessions[seid] = cloneSessionState(sess)
@@ -173,7 +181,11 @@ func shardForIPv4(ip net.IP, workerCount int) int {
 }
 
 func (d *Driver) publishSnapshotLocked() {
-	d.snapshot.Store(buildRuntimeSnapshot(d.sessions))
+	var trace []AdaptiveTraceEvent
+	if d.adaptiveTrace != nil {
+		trace = d.adaptiveTrace.snapshot(0)
+	}
+	d.snapshot.Store(buildRuntimeSnapshot(d.sessions, trace))
 }
 
 func (d *Driver) Snapshot() *RuntimeSnapshot {
@@ -273,11 +285,22 @@ func (d *Driver) DispatchPacket(packet Packet) PacketResult {
 
 	worker := d.workers[d.workerIndexFor(packet)]
 	resp := make(chan PacketResult, 1)
-	worker.queue <- packetJob{
+	job := packetJob{
 		packet: packet,
 		resp:   resp,
 	}
-	return <-resp
+	select {
+	case <-d.stopCh:
+		return PacketResult{Err: errNoWorkers}
+	case worker.queue <- job:
+	}
+
+	select {
+	case <-d.stopCh:
+		return PacketResult{Err: errNoWorkers}
+	case result := <-resp:
+		return result
+	}
 }
 
 func (d *Driver) enqueuePacket(packet Packet) error {

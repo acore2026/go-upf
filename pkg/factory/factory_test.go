@@ -136,6 +136,39 @@ logger:
 		assert.Equal(t, "upfue0", cfg.Gtpu.Userspace.TunName)
 		assert.EqualValues(t, 1400, cfg.Gtpu.Userspace.TunMTU)
 	})
+
+	t.Run("applies adaptive qos defaults", func(t *testing.T) {
+		cfgPath := writeConfigFile(t, t.TempDir(), `version: 1.0.3
+description: adaptive qos config
+pfcp:
+  addr: 127.0.0.8
+  nodeID: 127.0.0.8
+  retransTimeout: 1s
+gtpu:
+  forwarder: userspace
+  adaptiveQos:
+    enable: true
+dnnList:
+  - dnn: internet
+    cidr: 10.60.0.0/16
+logger:
+  enable: true
+  level: info
+  reportCaller: false
+`)
+
+		cfg, err := ReadConfig(cfgPath)
+
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.NotNil(t, cfg.Gtpu.AdaptiveQoS)
+		assert.True(t, cfg.Gtpu.AdaptiveQoS.Enable)
+		assert.Equal(t, 4433, cfg.Gtpu.AdaptiveQoS.MASQUEPort)
+		assert.Equal(t, "127.0.0.1", cfg.Gtpu.AdaptiveQoS.DebugBindAddress)
+		assert.Equal(t, 9082, cfg.Gtpu.AdaptiveQoS.DebugPort)
+		require.NotNil(t, cfg.Gtpu.AdaptiveQoS.Authorization)
+		assert.Equal(t, "30s", cfg.Gtpu.AdaptiveQoS.Authorization.DefaultProfileDuration.String())
+	})
 }
 
 func TestInitConfigFactoryUsesDefaultPath(t *testing.T) {

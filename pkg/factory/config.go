@@ -4,8 +4,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/acore2026/openapi/models"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/acore2026/go-upf/internal/logger"
 )
@@ -46,9 +46,10 @@ type Pfcp struct {
 }
 
 type Gtpu struct {
-	Forwarder string     `yaml:"forwarder" valid:"required,in(gtp5g|empty|userspace)"`
-	IfList    []IfInfo   `yaml:"ifList"    valid:"optional"`
-	Userspace *Userspace `yaml:"userspace" valid:"optional"`
+	Forwarder   string       `yaml:"forwarder"   valid:"required,in(gtp5g|empty|userspace)"`
+	IfList      []IfInfo     `yaml:"ifList"      valid:"optional"`
+	Userspace   *Userspace   `yaml:"userspace"   valid:"optional"`
+	AdaptiveQoS *AdaptiveQoS `yaml:"adaptiveQos" valid:"optional"`
 }
 
 type IfInfo struct {
@@ -70,6 +71,54 @@ type Userspace struct {
 	QueueSize int    `yaml:"queueSize" valid:"optional"`
 	TunName   string `yaml:"tunName"   valid:"optional"`
 	TunMTU    uint32 `yaml:"tunMtu"    valid:"optional"`
+}
+
+type AdaptiveQoS struct {
+	Enable            bool                      `yaml:"enable"            valid:"optional"`
+	MASQUEBindAddress string                    `yaml:"masqueBindAddress" valid:"optional,host"`
+	MASQUEPort        int                       `yaml:"masquePort"        valid:"optional,port"`
+	ReportBindAddress string                    `yaml:"reportBindAddress" valid:"optional,host"`
+	ReportPort        int                       `yaml:"reportPort"        valid:"optional,port"`
+	DebugBindAddress  string                    `yaml:"debugBindAddress"  valid:"optional,host"`
+	DebugPort         int                       `yaml:"debugPort"         valid:"optional,port"`
+	TLS               *Tls                      `yaml:"tls"               valid:"optional"`
+	GNBControl        *AdaptiveQoSGNBControl    `yaml:"gnbControl"        valid:"optional"`
+	Authorization     *AdaptiveQoSAuthorization `yaml:"authorization"     valid:"optional"`
+	Rules             []AdaptiveQoSRule         `yaml:"rules"             valid:"optional"`
+}
+
+type AdaptiveQoSGNBControl struct {
+	Addr string `yaml:"addr" valid:"optional,host"`
+	Port int    `yaml:"port" valid:"optional,port"`
+}
+
+type AdaptiveQoSAuthorization struct {
+	DefaultProfileDuration time.Duration `yaml:"defaultProfileDuration" valid:"optional"`
+	MaxBitrateUL           uint64        `yaml:"maxBitrateUl"           valid:"optional"`
+	MaxBitrateDL           uint64        `yaml:"maxBitrateDl"           valid:"optional"`
+	MaxGFBRUL              uint64        `yaml:"maxGfbrUl"              valid:"optional"`
+	MaxGFBRDL              uint64        `yaml:"maxGfbrDl"              valid:"optional"`
+}
+
+type AdaptiveQoSRule struct {
+	Name                   string        `yaml:"name"                      valid:"optional"`
+	TrafficPattern         string        `yaml:"trafficPattern"            valid:"optional"`
+	LatencySensitivity     string        `yaml:"latencySensitivity"        valid:"optional"`
+	PacketLossTolerance    string        `yaml:"packetLossTolerance"       valid:"optional"`
+	BitrateChangeDirection string        `yaml:"bitrateChangeDirection"    valid:"optional"`
+	Target5QI              uint8         `yaml:"target5qi"                 valid:"optional"`
+	TargetARP              uint8         `yaml:"targetArp"                 valid:"optional"`
+	TargetGFBRUL           uint64        `yaml:"targetGfbrUl"              valid:"optional"`
+	TargetGFBRDL           uint64        `yaml:"targetGfbrDl"              valid:"optional"`
+	TargetMFBRUL           uint64        `yaml:"targetMfbrUl"              valid:"optional"`
+	TargetMFBRDL           uint64        `yaml:"targetMfbrDl"              valid:"optional"`
+	TargetPacketLossRateUL uint32        `yaml:"targetPacketLossRateUl"    valid:"optional"`
+	TargetPacketLossRateDL uint32        `yaml:"targetPacketLossRateDl"    valid:"optional"`
+	OverrideGateUL         *bool         `yaml:"overrideGateUl"            valid:"optional"`
+	OverrideGateDL         *bool         `yaml:"overrideGateDl"            valid:"optional"`
+	OverrideMBRUL          uint64        `yaml:"overrideMbrUl"             valid:"optional"`
+	OverrideMBRDL          uint64        `yaml:"overrideMbrDl"             valid:"optional"`
+	Duration               time.Duration `yaml:"duration"                  valid:"optional"`
 }
 
 type Logger struct {
@@ -107,6 +156,35 @@ func (c *Config) SetDefaults() {
 		}
 		if c.Gtpu.Userspace.TunName == "" {
 			c.Gtpu.Userspace.TunName = "upfusr0"
+		}
+		if c.Gtpu.AdaptiveQoS != nil && c.Gtpu.AdaptiveQoS.Enable {
+			if c.Gtpu.AdaptiveQoS.MASQUEBindAddress == "" {
+				c.Gtpu.AdaptiveQoS.MASQUEBindAddress = UpfDefaultIPv4
+			}
+			if c.Gtpu.AdaptiveQoS.MASQUEPort == 0 {
+				c.Gtpu.AdaptiveQoS.MASQUEPort = 4433
+			}
+			if c.Gtpu.AdaptiveQoS.ReportBindAddress == "" {
+				c.Gtpu.AdaptiveQoS.ReportBindAddress = "127.0.0.1"
+			}
+			if c.Gtpu.AdaptiveQoS.ReportPort == 0 {
+				c.Gtpu.AdaptiveQoS.ReportPort = 7777
+			}
+			if c.Gtpu.AdaptiveQoS.DebugBindAddress == "" {
+				c.Gtpu.AdaptiveQoS.DebugBindAddress = "127.0.0.1"
+			}
+			if c.Gtpu.AdaptiveQoS.DebugPort == 0 {
+				c.Gtpu.AdaptiveQoS.DebugPort = 9082
+			}
+			if c.Gtpu.AdaptiveQoS.Authorization == nil {
+				c.Gtpu.AdaptiveQoS.Authorization = &AdaptiveQoSAuthorization{}
+			}
+			if c.Gtpu.AdaptiveQoS.Authorization.DefaultProfileDuration <= 0 {
+				c.Gtpu.AdaptiveQoS.Authorization.DefaultProfileDuration = 30 * time.Second
+			}
+			if c.Gtpu.AdaptiveQoS.GNBControl != nil && c.Gtpu.AdaptiveQoS.GNBControl.Port == 0 {
+				c.Gtpu.AdaptiveQoS.GNBControl.Port = UpfGtpDefaultPort
+			}
 		}
 	}
 
@@ -152,6 +230,26 @@ func (c *Config) GetCertKeyPath() string {
 		return UpfDefaultPrivateKeyPath
 	}
 	return c.Sbi.Tls.Key
+}
+
+func (c *Config) GetAdaptiveQoSCertPemPath() string {
+	if c == nil {
+		return UpfDefaultCertPemPath
+	}
+	if c.Gtpu == nil || c.Gtpu.AdaptiveQoS == nil || c.Gtpu.AdaptiveQoS.TLS == nil || c.Gtpu.AdaptiveQoS.TLS.Pem == "" {
+		return c.GetCertPemPath()
+	}
+	return c.Gtpu.AdaptiveQoS.TLS.Pem
+}
+
+func (c *Config) GetAdaptiveQoSCertKeyPath() string {
+	if c == nil {
+		return UpfDefaultPrivateKeyPath
+	}
+	if c.Gtpu == nil || c.Gtpu.AdaptiveQoS == nil || c.Gtpu.AdaptiveQoS.TLS == nil || c.Gtpu.AdaptiveQoS.TLS.Key == "" {
+		return c.GetCertKeyPath()
+	}
+	return c.Gtpu.AdaptiveQoS.TLS.Key
 }
 
 func (c *Config) GetVersion() string {

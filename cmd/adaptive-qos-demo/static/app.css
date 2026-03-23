@@ -1,0 +1,404 @@
+:root {
+  --bg: #f6efe2;
+  --bg-deep: #ead8bb;
+  --panel: rgba(255, 252, 246, 0.88);
+  --panel-strong: rgba(255, 248, 237, 0.96);
+  --ink: #1f2430;
+  --muted: #6a6f78;
+  --accent: #b6482d;
+  --accent-soft: #f2c56b;
+  --border: rgba(31, 36, 48, 0.12);
+  --danger: #a32424;
+  --shadow: 0 20px 60px rgba(83, 46, 12, 0.14);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.85), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(182, 72, 45, 0.18), transparent 28%),
+    linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%);
+}
+
+.shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+}
+
+.hero,
+.panel,
+.card {
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+}
+
+.hero,
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.8rem;
+}
+
+.hero h1,
+.panel h2,
+.card h2 {
+  margin: 0;
+}
+
+.summary {
+  max-width: 62ch;
+  color: var(--muted);
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  background: linear-gradient(135deg, var(--accent) 0%, #d4713e 100%);
+  color: #fff8ef;
+}
+
+.secondary {
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+.status-line {
+  margin-top: 16px;
+  min-height: 1.5rem;
+  color: var(--muted);
+}
+
+.diagram-shell {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 16px;
+  margin: 20px 0 16px;
+}
+
+.diagram-panel,
+.live-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 20px;
+}
+
+.component-diagram {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.diagram-node,
+.diagram-link {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-radius: 20px;
+  padding: 12px;
+}
+
+.diagram-node {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(31, 36, 48, 0.1);
+  font-weight: 700;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.diagram-node.active {
+  background: linear-gradient(135deg, rgba(182, 72, 45, 0.18), rgba(242, 197, 107, 0.2));
+  border-color: rgba(182, 72, 45, 0.45);
+  transform: translateY(-2px);
+}
+
+.diagram-link {
+  min-height: 2px;
+  font-size: 0.84rem;
+  color: var(--accent);
+  position: relative;
+}
+
+.diagram-link::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(182, 72, 45, 0.15), rgba(182, 72, 45, 0.9));
+}
+
+.live-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 14px;
+}
+
+.summary-chip {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(31, 36, 48, 0.08);
+  padding: 12px 14px;
+}
+
+.summary-chip strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.summary-chip span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.activity-strip {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.activity-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.activity-bar {
+  position: relative;
+  overflow: hidden;
+  min-height: 40px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(31, 36, 48, 0.08);
+}
+
+.activity-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(182, 72, 45, 0.82), rgba(242, 197, 107, 0.9));
+  transition: width 220ms ease;
+}
+
+.activity-text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 14px;
+  font-weight: 600;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.card {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 18px;
+}
+
+.panel {
+  margin-top: 16px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(182, 72, 45, 0.08);
+  color: var(--accent);
+  font-size: 0.86rem;
+}
+
+dl {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 10px;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+.state-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.event {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(31, 36, 48, 0.08);
+}
+
+.event-detail {
+  padding: 0;
+}
+
+.event-detail > summary {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.event-detail > summary::-webkit-details-marker {
+  display: none;
+}
+
+.event-detail[open] > summary {
+  border-bottom: 1px solid rgba(31, 36, 48, 0.08);
+}
+
+.event-detail pre {
+  margin: 0;
+  padding: 12px 16px 14px;
+  font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #2b2f39;
+  background: rgba(255, 255, 255, 0.75);
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 18px;
+}
+
+.event time {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.event strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.degraded {
+  border-color: rgba(163, 36, 36, 0.35);
+}
+
+.error {
+  color: var(--danger);
+}
+
+@media (max-width: 980px) {
+  .diagram-shell,
+  .grid,
+  .state-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .component-diagram {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .diagram-link {
+    min-height: 52px;
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 20px, 100%);
+    padding-top: 20px;
+  }
+
+  .diagram-shell,
+  .grid,
+  .state-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .component-diagram,
+  .live-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .event {
+    grid-template-columns: 1fr;
+  }
+
+  .event-detail > summary {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-row {
+    grid-template-columns: 1fr;
+  }
+}
