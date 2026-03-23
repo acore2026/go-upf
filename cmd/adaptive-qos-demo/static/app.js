@@ -29,7 +29,7 @@ const fields = {
 };
 
 document.getElementById("run-story").addEventListener("click", runStory);
-document.getElementById("reset-view").addEventListener("click", resetView);
+document.getElementById("reset-view").addEventListener("click", resetStory);
 
 render();
 refreshAll();
@@ -53,12 +53,32 @@ async function runStory() {
   }
 }
 
+async function resetStory() {
+  setStatus("Resetting story components...");
+  try {
+    const response = await fetchJSON("/api/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    state.flowId = "";
+    state.errors = {};
+    state.data.sidecarStatus = null;
+    state.data.flow = null;
+    state.data.sidecarTrace = [];
+    state.data.upfStatus = null;
+    state.data.upfTrace = [];
+    setStatus(`Reset complete: UPF ${response.upf?.status || "unknown"}, sidecar ${response.sidecar?.status || "unknown"}`);
+    await refreshAll();
+  } catch (error) {
+    state.errors.sidecar = error.message;
+    setStatus(error.message, true);
+    render();
+  }
+}
+
 function resetView() {
-  state.flowId = "";
-  state.errors = {};
-  state.data.flow = null;
-  setStatus("View reset. Backend state is unchanged.");
-  render();
+  return resetStory();
 }
 
 async function refreshAll() {

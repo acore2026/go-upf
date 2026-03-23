@@ -1,15 +1,20 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,9 +24,12 @@ var staticFiles embed.FS
 type app struct {
 	sidecarBase *url.URL
 	upfBase     *url.URL
+	sidecarBin  string
+	sidecarCfg  string
 	client      *http.Client
 	static      http.Handler
 	staticFS    fs.FS
+	resetMu     sync.Mutex
 }
 
 func main() {
@@ -52,6 +60,8 @@ func main() {
 	a := &app{
 		sidecarBase: sidecarURL,
 		upfBase:     upfURL,
+		sidecarBin:  getenvDefault("SIDECAR_BIN", "./adaptive-qos-sidecar"),
+		sidecarCfg:  getenvDefault("SIDECAR_CONFIG", "./config/adaptive-qos-sidecar.yaml"),
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
@@ -74,6 +84,7 @@ func main() {
 
 func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/reset", a.handleReset)
 	mux.HandleFunc("/api/sidecar/", a.handleSidecarProxy)
 	mux.HandleFunc("/api/upf/", a.handleUPFProxy)
 	mux.HandleFunc("/", a.handleStatic)
@@ -103,6 +114,38 @@ func (a *app) handleUPFProxy(w http.ResponseWriter, r *http.Request) {
 	a.proxy(w, r, a.upfBase, "/api/upf")
 }
 
+func (a *app) handleReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	a.resetMu.Lock()
+	defer a.resetMu.Unlock()
+
+	resp := map[string]any{
+		"generatedAt": time.Now().UTC(),
+		"upf":         map[string]any{"status": "skipped"},
+		"sidecar":     map[string]any{"status": "skipped"},
+	}
+
+	if err := a.callJSON(r.Context(), a.upfBase, "/debug/adaptive-qos/reset", http.MethodPost); err != nil {
+		resp["upf"] = map[string]any{"status": "error", "error": err.Error()}
+	} else {
+		resp["upf"] = map[string]any{"status": "reset"}
+	}
+
+	if err := a.restartSidecar(r.Context()); err != nil {
+		resp["sidecar"] = map[string]any{"status": "error", "error": err.Error()}
+	} else {
+		resp["sidecar"] = map[string]any{"status": "restarted"}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 func (a *app) proxy(w http.ResponseWriter, r *http.Request, base *url.URL, prefix string) {
 	target := *base
 	target.Path = singleJoiningSlash(base.Path, strings.TrimPrefix(r.URL.Path, prefix))
@@ -126,6 +169,73 @@ func (a *app) proxy(w http.ResponseWriter, r *http.Request, base *url.URL, prefi
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+func (a *app) callJSON(ctx context.Context, base *url.URL, rawPath, method string) error {
+	target := *base
+	target.Path = singleJoiningSlash(base.Path, strings.TrimPrefix(rawPath, "/"))
+	req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Host = target.Host
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		if len(body) == 0 {
+			return fmt.Errorf("%s %s returned %s", method, target.String(), resp.Status)
+		}
+		return fmt.Errorf("%s %s returned %s: %s", method, target.String(), resp.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (a *app) restartSidecar(ctx context.Context) error {
+	if strings.TrimSpace(a.sidecarBin) == "" || strings.TrimSpace(a.sidecarCfg) == "" {
+		return fmt.Errorf("sidecar reset configuration missing")
+	}
+
+	_ = exec.CommandContext(ctx, "pkill", "-TERM", "-f", a.sidecarBin).Run()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := a.callJSON(ctx, a.sidecarBase, "/status", http.MethodGet); err != nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	_ = exec.CommandContext(ctx, "pkill", "-KILL", "-f", a.sidecarBin).Run()
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := a.callJSON(ctx, a.sidecarBase, "/status", http.MethodGet); err != nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	startCmd := fmt.Sprintf("cd /ueransim && nohup %q -config %q >/tmp/adaptive-qos-sidecar-reset.log 2>&1 &", a.sidecarBin, a.sidecarCfg)
+	if err := exec.Command("sh", "-lc", startCmd).Run(); err != nil {
+		return fmt.Errorf("restart sidecar: %w", err)
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := a.callJSON(ctx, a.sidecarBase, "/status", http.MethodGet); err == nil {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("sidecar did not become ready after restart")
+}
+
+func getenvDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func copyHeaders(dst, src http.Header) {

@@ -355,6 +355,7 @@ func (c *adaptiveQoSController) startDebugServer() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/adaptive-qos/status", c.handleDebugStatus)
 	mux.HandleFunc("/debug/adaptive-qos/trace", c.handleDebugTrace)
+	mux.HandleFunc("/debug/adaptive-qos/reset", c.handleDebugReset)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -480,6 +481,35 @@ func (c *adaptiveQoSController) handleDebugTrace(w http.ResponseWriter, r *http.
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+type adaptiveDebugResetResponse struct {
+	GeneratedAt    time.Time `json:"generatedAt"`
+	ActiveSessions int       `json:"activeSessions"`
+	ActiveFlows    int       `json:"activeFlows"`
+	TraceDepth     int       `json:"traceDepth"`
+	Status         string    `json:"status"`
+}
+
+func (c *adaptiveQoSController) handleDebugReset(w http.ResponseWriter, r *http.Request) {
+	if c == nil || c.driver == nil {
+		http.Error(w, "adaptive qos controller unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	summary := c.driver.resetAdaptiveState()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(adaptiveDebugResetResponse{
+		GeneratedAt:    summary.GeneratedAt,
+		ActiveSessions: summary.ActiveSessions,
+		ActiveFlows:    summary.ActiveFlows,
+		TraceDepth:     summary.TraceDepth,
+		Status:         "reset",
+	})
+}
+
 func formatAdaptiveTraceDetail(event AdaptiveTraceEvent) string {
 	parts := make([]string, 0, 14)
 	if event.ProfileID != "" {
@@ -573,6 +603,53 @@ func cloneAdaptiveReport(in AdaptiveReport) *AdaptiveReport {
 func cloneAdaptiveFeedback(in AdaptiveFeedback) *AdaptiveFeedback {
 	out := in
 	return &out
+}
+
+type adaptiveResetSummary struct {
+	GeneratedAt    time.Time
+	ActiveSessions int
+	ActiveFlows    int
+	TraceDepth     int
+}
+
+func (b *adaptiveTraceBuffer) reset() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.events = b.events[:0]
+}
+
+func (d *Driver) resetAdaptiveState() adaptiveResetSummary {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	activeFlows := 0
+	for _, sess := range d.sessions {
+		if sess == nil {
+			continue
+		}
+		activeFlows += len(sess.AdaptiveFlows)
+		for key := range sess.AdaptiveQER {
+			delete(sess.AdaptiveQER, key)
+		}
+		for key := range sess.AdaptiveFlows {
+			delete(sess.AdaptiveFlows, key)
+		}
+		sess.touch()
+	}
+	if d.adaptiveTrace != nil {
+		d.adaptiveTrace.reset()
+	}
+	d.publishSnapshotLocked()
+
+	return adaptiveResetSummary{
+		GeneratedAt:    time.Now().UTC(),
+		ActiveSessions: len(d.sessions),
+		ActiveFlows:    0,
+		TraceDepth:     0,
+	}
 }
 
 func makeAdaptiveTLSConfig(certFile string, keyFile string) (*tls.Config, error) {
