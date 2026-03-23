@@ -7,6 +7,7 @@ type adaptiveStoryView struct {
 	FlowID              string                      `json:"flowId,omitempty"`
 	Phase               string                      `json:"phase,omitempty"`
 	ProfileID           string                      `json:"profileId,omitempty"`
+	DefaultProfileID    string                      `json:"defaultProfileId,omitempty"`
 	PreviousProfileID   string                      `json:"previousProfileId,omitempty"`
 	DecisionReason      string                      `json:"decisionReason,omitempty"`
 	CPProvisionedRange  *adaptiveCPProvisionedRange `json:"cpProvisionedRange,omitempty"`
@@ -43,6 +44,7 @@ func (d *Driver) currentStoryView() *adaptiveStoryView {
 		FlowID:              latest.FlowID,
 		Phase:               latest.StoryPhase,
 		ProfileID:           storyProfileID(latest),
+		DefaultProfileID:    defaultAdaptiveProfileID(),
 		PreviousProfileID:   latest.PreviousProfileID,
 		DecisionReason:      latest.DecisionReason,
 		CPProvisionedRange:  latest.CPProvisionedRange,
@@ -71,4 +73,8 @@ func storyDurationMs(duration time.Duration, raw uint64) uint64 {
 		return 0
 	}
 	return uint64(duration / time.Millisecond)
+}
+
+func defaultAdaptiveProfileID() string {
+	return "adaptive-default"
 }

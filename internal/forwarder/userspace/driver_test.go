@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -469,6 +470,26 @@ func TestApplyAdaptiveReportPredictiveBurstReturnsStoryFeedback(t *testing.T) {
 	require.Equal(t, "predictive-burst", story.Scenario)
 	require.Equal(t, "story1-flow", story.FlowID)
 	require.Equal(t, "burst-protect", story.ProfileID)
+	require.Contains(t, story.DecisionReason, "burst=6291456B")
+	require.Contains(t, story.DecisionReason, "deadline=150ms")
+
+	driver.mu.RLock()
+	flow := driver.sessions[103].AdaptiveFlows["story1-flow"]
+	driver.mu.RUnlock()
+	require.NotNil(t, flow)
+	qos := flowQoSDecision(flow)
+	require.NotNil(t, qos)
+	require.Equal(t, uint64(6<<20), qos.RequestedBurstSize)
+	require.Equal(t, uint64(150), qos.RequestedDeadlineMs)
+	require.Equal(t, "burst", qos.RequestedTrafficPattern)
+	require.Equal(t, uint64(335544320), qos.RequestedBitrateDL)
+	require.Equal(t, uint64(41943040), qos.RequestedBitrateUL)
+	require.Equal(t, uint64(100000), qos.DefaultGFBRDL)
+	require.Equal(t, uint64(100000), qos.DefaultGFBRUL)
+	require.Equal(t, uint64(335544320), qos.OverrideMBRDL)
+	require.Equal(t, uint64(41943040), qos.OverrideMBRUL)
+	require.Equal(t, "high", qos.RequestedPriority)
+	require.True(t, strings.Contains(qos.DecisionReason, "requestedDL=335544320"))
 }
 
 func TestApplyAdaptiveReportEndClearsOverrides(t *testing.T) {

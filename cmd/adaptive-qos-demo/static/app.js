@@ -126,6 +126,7 @@ function render() {
   const lastFeedback = normalizeResponseMessage(flow.lastFeedback || sidecarStatus.lastFeedback || {});
   const sidecarStory = sidecarStatus.story || {};
   const upfStory = state.data.upfStatus?.story || {};
+  const upfDecision = state.data.upfStatus?.qosDecision || {};
   const effectiveStory = Object.keys(upfStory).length ? upfStory : sidecarStory;
   const mergedTimeline = mergeTimeline(state.data.sidecarTrace || [], state.data.upfTrace || []);
   const liveStage = deriveLiveStage(effectiveStory, mergedTimeline);
@@ -148,8 +149,23 @@ function render() {
 
   renderFields(fields.upf, [
     ["Selected Profile", lastFeedback.profileId || upfStory.profileId || "not available"],
+    ["Default QoS Profile", upfDecision.defaultProfileId || upfStory.defaultProfileId || "adaptive-default"],
     ["Flow ID", effectiveStory.flowId || state.flowId || "not available"],
     ["Scenario", upfStory.scenario || effectiveStory.scenario || "not available"],
+    ["Decision Reason", upfStory.decisionReason || upfDecision.decisionReason || "not available"],
+    ["Requested Burst", formatBytes(upfStory.burstSize || lastReport.burstSize)],
+    ["Requested Deadline", formatDuration(upfStory.deadlineMs || lastReport.deadlineMs)],
+    ["Requested Priority", upfDecision.requestedPriority || lastReport.priority || "not available"],
+    ["Requested DL Bitrate", formatBitrate(upfDecision.requestedBitrateDl)],
+    ["Requested UL Bitrate", formatBitrate(upfDecision.requestedBitrateUl)],
+    ["Burst GBR DL", formatBitrate(upfDecision.overrideGfbrDl)],
+    ["Burst GBR UL", formatBitrate(upfDecision.overrideGfbrUl)],
+    ["Default GBR DL", formatBitrate(resolveDefaultGbr(upfDecision.defaultGfbrDl))],
+    ["Default GBR UL", formatBitrate(resolveDefaultGbr(upfDecision.defaultGfbrUl))],
+    ["GBR Increase DL", formatBitrateDelta(resolveDefaultGbr(upfDecision.defaultGfbrDl), upfDecision.overrideGfbrDl)],
+    ["GBR Increase UL", formatBitrateDelta(resolveDefaultGbr(upfDecision.defaultGfbrUl), upfDecision.overrideGfbrUl)],
+    ["DL MBR", formatBitrate(upfDecision.overrideMbrDl)],
+    ["UL MBR", formatBitrate(upfDecision.overrideMbrUl)],
     ["Debug Trace", numberOrNA(state.data.upfStatus?.traceDepth)],
     ["Serve Error", state.data.upfStatus?.serveError || state.errors.upf || "none"],
   ]);
@@ -165,12 +181,17 @@ function render() {
   renderFields(fields.current, [
     ["Flow ID", effectiveStory.flowId || state.flowId || "not available"],
     ["Current Profile", lastFeedback.profileId || upfStory.profileId || "not available"],
-    ["Available Bitrate", "not available yet"],
-    ["Congestion Level", "not available yet"],
-    ["Preferred Resolution", "not available yet"],
+    ["Default QoS Profile", upfDecision.defaultProfileId || upfStory.defaultProfileId || "adaptive-default"],
+    ["Requested Burst", formatBytes(upfStory.burstSize || lastReport.burstSize)],
+    ["Requested Deadline", formatDuration(upfStory.deadlineMs || lastReport.deadlineMs)],
+    ["Requested Priority", upfDecision.requestedPriority || lastReport.priority || "not available"],
+    ["Requested DL Bitrate", formatBitrate(upfDecision.requestedBitrateDl)],
+    ["Burst GBR DL", formatBitrate(upfDecision.overrideGfbrDl)],
+    ["Default GBR DL", formatBitrate(resolveDefaultGbr(upfDecision.defaultGfbrDl))],
+    ["GBR Increase DL", formatBitrateDelta(resolveDefaultGbr(upfDecision.defaultGfbrDl), upfDecision.overrideGfbrDl)],
     ["Predicted Air Delay", formatDuration(lastFeedback.predictedAirDelayMs || upfStory.predictedAirDelayMs)],
     ["Block Success Ratio", ratioOrNA(lastFeedback.blockSuccessRatio || upfStory.blockSuccessRatio)],
-    ["Recommended Action", "not available yet"],
+    ["Recommended Action", upfStory.qosDecision?.selectedProfileId || lastFeedback.profileId || "not available"],
   ]);
 
   renderFields(fields.scope, [
@@ -233,6 +254,7 @@ function renderLiveView(story, lastReport, lastFeedback, liveStage, timeline) {
   const chips = [
     ["Right now", liveStage.description],
     ["Current profile", lastFeedback.profileId || story.profileId || "not available"],
+    ["Default profile", story.defaultProfileId || "adaptive-default"],
     ["Current scenario", story.scenario || lastReport.scenario || "not available"],
     ["Burst window", formatTime(lastReport.expectedArrivalTime)],
     ["Latest event", latestEvent ? `${latestEvent.component} · ${latestEvent.stage}` : "waiting for activity"],
@@ -495,6 +517,28 @@ function formatBytes(value) {
   if (!value) return "not available";
   const mib = value / (1024 * 1024);
   return `${mib.toFixed(1)} MiB`;
+}
+
+function formatBitrate(value) {
+  if (!value) return "not available";
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)} Mbps`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(0)} kbps`;
+  }
+  return `${value} bps`;
+}
+
+function formatBitrateDelta(base, value) {
+  if (!value && !base) return "not available";
+  const delta = (value || 0) - (base || 0);
+  const sign = delta > 0 ? "+" : delta < 0 ? "-" : "";
+  return `${sign}${formatBitrate(Math.abs(delta))}`;
+}
+
+function resolveDefaultGbr(value) {
+  return value || 100000;
 }
 
 function formatDuration(value) {

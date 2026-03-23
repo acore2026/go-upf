@@ -47,6 +47,8 @@ type AdaptiveReport struct {
 	TrafficPattern      string        `json:"trafficPattern,omitempty"`
 	LatencySensitivity  string        `json:"latencySensitivity,omitempty"`
 	PacketLossTolerance string        `json:"packetLossTolerance,omitempty"`
+	Priority            string        `json:"priority,omitempty"`
+	ExpectedArrivalTime time.Time     `json:"expectedArrivalTime,omitempty"`
 	BurstSize           uint64        `json:"burstSize,omitempty"`
 	BurstDuration       time.Duration `json:"burstDuration,omitempty"`
 	BurstDurationMs     uint64        `json:"burstDurationMs,omitempty"`
@@ -71,6 +73,8 @@ type AdaptiveProfile struct {
 	ProfileID      string
 	OverrideGateUL *bool
 	OverrideGateDL *bool
+	OverrideGFBRUL uint64
+	OverrideGFBRDL uint64
 	OverrideMBRUL  uint64
 	OverrideMBRDL  uint64
 	Duration       time.Duration
@@ -81,6 +85,8 @@ type AdaptiveQEROverride struct {
 	ApplyToQERID   uint32
 	OverrideGateUL *bool
 	OverrideGateDL *bool
+	OverrideGFBRUL uint64
+	OverrideGFBRDL uint64
 	OverrideMBRUL  uint64
 	OverrideMBRDL  uint64
 	ExpiresAt      time.Time
@@ -117,6 +123,7 @@ type AdaptiveTraceEvent struct {
 	PredictedAirDelayMs uint64                      `json:"predictedAirDelayMs,omitempty"`
 	BlockSuccessRatio   float64                     `json:"blockSuccessRatio,omitempty"`
 	PreviousProfileID   string                      `json:"previousProfileId,omitempty"`
+	DefaultProfileID    string                      `json:"defaultProfileId,omitempty"`
 	DecisionReason      string                      `json:"decisionReason,omitempty"`
 	CPProvisionedRange  *adaptiveCPProvisionedRange `json:"cpProvisionedRange,omitempty"`
 	QoSDecision         *adaptiveQoSDecisionView    `json:"qosDecision,omitempty"`
@@ -196,6 +203,7 @@ type adaptiveDebugStatus struct {
 	TraceDepth         int                         `json:"traceDepth"`
 	Story              *adaptiveStoryView          `json:"story,omitempty"`
 	PreviousProfileID  string                      `json:"previousProfileId,omitempty"`
+	DefaultProfileID   string                      `json:"defaultProfileId,omitempty"`
 	CPProvisionedRange *adaptiveCPProvisionedRange `json:"cpProvisionedRange,omitempty"`
 	QoSDecision        *adaptiveQoSDecisionView    `json:"qosDecision,omitempty"`
 	ServeError         string                      `json:"serveError,omitempty"`
@@ -218,6 +226,7 @@ type adaptiveDebugTraceEvent struct {
 	PredictedAirDelayMs uint64                      `json:"predictedAirDelayMs,omitempty"`
 	BlockSuccessRatio   float64                     `json:"blockSuccessRatio,omitempty"`
 	PreviousProfileID   string                      `json:"previousProfileId,omitempty"`
+	DefaultProfileID    string                      `json:"defaultProfileId,omitempty"`
 	DecisionReason      string                      `json:"decisionReason,omitempty"`
 	CPProvisionedRange  *adaptiveCPProvisionedRange `json:"cpProvisionedRange,omitempty"`
 	QoSDecision         *adaptiveQoSDecisionView    `json:"qosDecision,omitempty"`
@@ -245,15 +254,30 @@ type adaptiveCPProvisionedRange struct {
 }
 
 type adaptiveQoSDecisionView struct {
-	SelectedProfileID string   `json:"selectedProfileId,omitempty"`
-	PreviousProfileID string   `json:"previousProfileId,omitempty"`
-	DecisionReason    string   `json:"decisionReason,omitempty"`
-	AppliedQERIDs     []uint32 `json:"appliedQerIds,omitempty"`
-	OverrideGateUL    *bool    `json:"overrideGateUl,omitempty"`
-	OverrideGateDL    *bool    `json:"overrideGateDl,omitempty"`
-	OverrideMBRUL     uint64   `json:"overrideMbrUl,omitempty"`
-	OverrideMBRDL     uint64   `json:"overrideMbrDl,omitempty"`
-	DurationMs        uint64   `json:"durationMs,omitempty"`
+	SelectedProfileID            string    `json:"selectedProfileId,omitempty"`
+	PreviousProfileID            string    `json:"previousProfileId,omitempty"`
+	DecisionReason               string    `json:"decisionReason,omitempty"`
+	AppliedQERIDs                []uint32  `json:"appliedQerIds,omitempty"`
+	OverrideGateUL               *bool     `json:"overrideGateUl,omitempty"`
+	OverrideGateDL               *bool     `json:"overrideGateDl,omitempty"`
+	OverrideGFBRUL               uint64    `json:"overrideGfbrUl,omitempty"`
+	OverrideGFBRDL               uint64    `json:"overrideGfbrDl,omitempty"`
+	DefaultGFBRUL                uint64    `json:"defaultGfbrUl,omitempty"`
+	DefaultGFBRDL                uint64    `json:"defaultGfbrDl,omitempty"`
+	OverrideMBRUL                uint64    `json:"overrideMbrUl,omitempty"`
+	OverrideMBRDL                uint64    `json:"overrideMbrDl,omitempty"`
+	DurationMs                   uint64    `json:"durationMs,omitempty"`
+	RequestedTrafficPattern      string    `json:"requestedTrafficPattern,omitempty"`
+	RequestedLatencySensitivity  string    `json:"requestedLatencySensitivity,omitempty"`
+	RequestedPacketLossTolerance string    `json:"requestedPacketLossTolerance,omitempty"`
+	RequestedBurstSize           uint64    `json:"requestedBurstSize,omitempty"`
+	RequestedBurstDurationMs     uint64    `json:"requestedBurstDurationMs,omitempty"`
+	RequestedDeadlineMs          uint64    `json:"requestedDeadlineMs,omitempty"`
+	RequestedPriority            string    `json:"requestedPriority,omitempty"`
+	RequestedBitrateDL           uint64    `json:"requestedBitrateDl,omitempty"`
+	RequestedBitrateUL           uint64    `json:"requestedBitrateUl,omitempty"`
+	RequestedArrivalTime         time.Time `json:"requestedArrivalTime,omitempty"`
+	DefaultProfileID             string    `json:"defaultProfileId,omitempty"`
 }
 
 func newAdaptiveQoSController(d *Driver, cfg *factory.Config) *adaptiveQoSController {
@@ -426,6 +450,7 @@ func (c *adaptiveQoSController) handleDebugStatus(w http.ResponseWriter, _ *http
 		TraceDepth:         len(snapshot.AdaptiveTrace),
 		Story:              c.driver.currentStoryView(),
 		PreviousProfileID:  flowPreviousProfileID(latestFlow),
+		DefaultProfileID:   defaultAdaptiveProfileID(),
 		CPProvisionedRange: flowCPProvisionedRange(latestFlow),
 		QoSDecision:        flowQoSDecision(latestFlow),
 		ServeError:         c.debugServeError(),
@@ -469,6 +494,7 @@ func (c *adaptiveQoSController) handleDebugTrace(w http.ResponseWriter, r *http.
 			PredictedAirDelayMs: event.PredictedAirDelayMs,
 			BlockSuccessRatio:   event.BlockSuccessRatio,
 			PreviousProfileID:   event.PreviousProfileID,
+			DefaultProfileID:    event.DefaultProfileID,
 			DecisionReason:      event.DecisionReason,
 			CPProvisionedRange:  event.CPProvisionedRange,
 			QoSDecision:         event.QoSDecision,
@@ -517,6 +543,9 @@ func formatAdaptiveTraceDetail(event AdaptiveTraceEvent) string {
 	}
 	if event.PreviousProfileID != "" {
 		parts = append(parts, "previousProfile="+event.PreviousProfileID)
+	}
+	if event.DefaultProfileID != "" {
+		parts = append(parts, "defaultProfile="+event.DefaultProfileID)
 	}
 	if event.Status != "" {
 		parts = append(parts, "status="+event.Status)
@@ -572,16 +601,32 @@ func flowQoSDecision(flow *AdaptiveFlowState) *adaptiveQoSDecisionView {
 	if flow == nil || flow.SelectedProfile == nil {
 		return nil
 	}
+	report := flow.LatestReport
 	return &adaptiveQoSDecisionView{
-		SelectedProfileID: flow.SelectedProfile.ProfileID,
-		PreviousProfileID: flow.PreviousProfileID,
-		DecisionReason:    flow.DecisionReason,
-		AppliedQERIDs:     append([]uint32(nil), flow.AppliedQERIDs...),
-		OverrideGateUL:    flow.SelectedProfile.OverrideGateUL,
-		OverrideGateDL:    flow.SelectedProfile.OverrideGateDL,
-		OverrideMBRUL:     flow.SelectedProfile.OverrideMBRUL,
-		OverrideMBRDL:     flow.SelectedProfile.OverrideMBRDL,
-		DurationMs:        storyDurationMs(flow.SelectedProfile.Duration, 0),
+		SelectedProfileID:            flow.SelectedProfile.ProfileID,
+		PreviousProfileID:            flow.PreviousProfileID,
+		DefaultProfileID:             defaultAdaptiveProfileID(),
+		DecisionReason:               flow.DecisionReason,
+		AppliedQERIDs:                append([]uint32(nil), flow.AppliedQERIDs...),
+		OverrideGateUL:               flow.SelectedProfile.OverrideGateUL,
+		OverrideGateDL:               flow.SelectedProfile.OverrideGateDL,
+		OverrideGFBRUL:               flow.SelectedProfile.OverrideGFBRUL,
+		OverrideGFBRDL:               flow.SelectedProfile.OverrideGFBRDL,
+		DefaultGFBRUL:                defaultAdaptiveGFBR(),
+		DefaultGFBRDL:                defaultAdaptiveGFBR(),
+		OverrideMBRUL:                flow.SelectedProfile.OverrideMBRUL,
+		OverrideMBRDL:                flow.SelectedProfile.OverrideMBRDL,
+		DurationMs:                   storyDurationMs(flow.SelectedProfile.Duration, 0),
+		RequestedTrafficPattern:      report.TrafficPattern,
+		RequestedLatencySensitivity:  report.LatencySensitivity,
+		RequestedPacketLossTolerance: report.PacketLossTolerance,
+		RequestedBurstSize:           report.BurstSize,
+		RequestedBurstDurationMs:     storyDurationMs(report.BurstDuration, report.BurstDurationMs),
+		RequestedDeadlineMs:          storyDurationMs(report.Deadline, report.DeadlineMs),
+		RequestedPriority:            inferBurstPriority(report),
+		RequestedBitrateDL:           rateFromBurst(report.BurstSize, report.DeadlineMsOrBurstDurationMs()),
+		RequestedBitrateUL:           rateFromBurst(report.BurstSize/8, report.DeadlineMsOrBurstDurationMs()),
+		RequestedArrivalTime:         report.expectedArrivalTime(),
 	}
 }
 
@@ -812,14 +857,15 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 			feedback.ReasonCode = "SESSION_HINT_REQUIRED"
 		}
 		d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
-			Timestamp:       now,
-			FlowID:          report.FlowID,
-			UEAddress:       report.UEAddress,
-			Stage:           "session-resolve",
-			Status:          feedback.Status,
-			ReasonCode:      feedback.ReasonCode,
-			RequestMessage:  cloneAdaptiveReport(report),
-			ResponseMessage: cloneAdaptiveFeedback(feedback),
+			Timestamp:        now,
+			FlowID:           report.FlowID,
+			UEAddress:        report.UEAddress,
+			Stage:            "session-resolve",
+			Status:           feedback.Status,
+			ReasonCode:       feedback.ReasonCode,
+			DefaultProfileID: defaultAdaptiveProfileID(),
+			RequestMessage:   cloneAdaptiveReport(report),
+			ResponseMessage:  cloneAdaptiveFeedback(feedback),
 		})
 		d.publishSnapshotLocked()
 		return feedback
@@ -831,7 +877,7 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 		previousProfileID = storyProfileID(existing)
 	}
 	cpProvisionedRange := d.collectCPProvisionedRange(sess)
-	profile, decisionReason := d.selectAdaptiveProfile(report)
+	profile, decisionReason := d.selectAdaptiveProfile(report, cpProvisionedRange)
 	if profile.Duration <= 0 {
 		profile.Duration = d.defaultAdaptiveDuration()
 	}
@@ -843,6 +889,8 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 			ApplyToQERID:   qerID,
 			OverrideGateUL: profile.OverrideGateUL,
 			OverrideGateDL: profile.OverrideGateDL,
+			OverrideGFBRUL: profile.OverrideGFBRUL,
+			OverrideGFBRDL: profile.OverrideGFBRDL,
 			OverrideMBRUL:  profile.OverrideMBRUL,
 			OverrideMBRDL:  profile.OverrideMBRDL,
 			ExpiresAt:      expiresAt,
@@ -873,8 +921,8 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 	if report.Scenario == "predictive-burst" {
 		flow.StoryPhase = "prepared"
 		flow.GNBDecision = "ACCEPTED"
-		flow.PredictedAirDelayMs = 8
-		flow.BlockSuccessRatio = 0.99
+		flow.PredictedAirDelayMs = derivePredictedAirDelay(report)
+		flow.BlockSuccessRatio = deriveBlockSuccessRatio(report)
 		feedback.StoryPhase = flow.StoryPhase
 		feedback.GNBDecision = flow.GNBDecision
 		feedback.PredictedAirDelayMs = flow.PredictedAirDelayMs
@@ -898,6 +946,7 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 		PredictedAirDelayMs: feedback.PredictedAirDelayMs,
 		BlockSuccessRatio:   feedback.BlockSuccessRatio,
 		PreviousProfileID:   previousProfileID,
+		DefaultProfileID:    defaultAdaptiveProfileID(),
 		DecisionReason:      decisionReason,
 		CPProvisionedRange:  cpProvisionedRange,
 		QoSDecision:         flowQoSDecision(flow),
@@ -933,30 +982,32 @@ func (d *Driver) endAdaptiveFlow(report AdaptiveReport, now time.Time) AdaptiveF
 		feedback.ReasonCode = "ENDED"
 		feedback.ProfileID = storyProfileID(flow)
 		d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
-			Timestamp:       now,
-			FlowID:          report.FlowID,
-			UEAddress:       flow.UEAddress,
-			SEID:            sess.SEID,
-			Stage:           "upf-profile-cleared",
-			Status:          feedback.Status,
-			ReasonCode:      feedback.ReasonCode,
-			ProfileID:       feedback.ProfileID,
-			RequestMessage:  cloneAdaptiveReport(report),
-			ResponseMessage: cloneAdaptiveFeedback(feedback),
+			Timestamp:        now,
+			FlowID:           report.FlowID,
+			UEAddress:        flow.UEAddress,
+			SEID:             sess.SEID,
+			Stage:            "upf-profile-cleared",
+			Status:           feedback.Status,
+			ReasonCode:       feedback.ReasonCode,
+			ProfileID:        feedback.ProfileID,
+			DefaultProfileID: defaultAdaptiveProfileID(),
+			RequestMessage:   cloneAdaptiveReport(report),
+			ResponseMessage:  cloneAdaptiveFeedback(feedback),
 		})
 		d.publishSnapshotLocked()
 		return feedback
 	}
 
 	d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
-		Timestamp:       now,
-		FlowID:          report.FlowID,
-		UEAddress:       report.UEAddress,
-		Stage:           "upf-profile-clear-miss",
-		Status:          feedback.Status,
-		ReasonCode:      feedback.ReasonCode,
-		RequestMessage:  cloneAdaptiveReport(report),
-		ResponseMessage: cloneAdaptiveFeedback(feedback),
+		Timestamp:        now,
+		FlowID:           report.FlowID,
+		UEAddress:        report.UEAddress,
+		Stage:            "upf-profile-clear-miss",
+		Status:           feedback.Status,
+		ReasonCode:       feedback.ReasonCode,
+		DefaultProfileID: defaultAdaptiveProfileID(),
+		RequestMessage:   cloneAdaptiveReport(report),
+		ResponseMessage:  cloneAdaptiveFeedback(feedback),
 	})
 	d.publishSnapshotLocked()
 	return feedback
@@ -1002,14 +1053,19 @@ func (d *Driver) defaultAdaptiveDuration() time.Duration {
 	return duration
 }
 
-func (d *Driver) selectAdaptiveProfile(report AdaptiveReport) (*AdaptiveProfile, string) {
+func (d *Driver) selectAdaptiveProfile(report AdaptiveReport, cp *adaptiveCPProvisionedRange) (*AdaptiveProfile, string) {
 	if report.Scenario == "predictive-burst" {
+		decision := derivePredictiveBurstDecision(report, cp)
 		return &AdaptiveProfile{
-			ProfileID:      "burst-protect",
-			OverrideGateUL: boolPtr(true),
-			OverrideGateDL: boolPtr(true),
-			Duration:       d.defaultAdaptiveDuration(),
-		}, "scenario=predictive-burst"
+			ProfileID:      decision.SelectedProfileID,
+			OverrideGateUL: decision.OverrideGateUL,
+			OverrideGateDL: decision.OverrideGateDL,
+			OverrideGFBRUL: decision.OverrideGFBRUL,
+			OverrideGFBRDL: decision.OverrideGFBRDL,
+			OverrideMBRUL:  decision.OverrideMBRUL,
+			OverrideMBRDL:  decision.OverrideMBRDL,
+			Duration:       time.Duration(decision.DurationMs) * time.Millisecond,
+		}, decision.DecisionReason
 	}
 
 	if d != nil && d.adaptiveQoS != nil && d.adaptiveQoS.cfg != nil {
@@ -1025,6 +1081,8 @@ func (d *Driver) selectAdaptiveProfile(report AdaptiveReport) (*AdaptiveProfile,
 				ProfileID:      name,
 				OverrideGateUL: rule.OverrideGateUL,
 				OverrideGateDL: rule.OverrideGateDL,
+				OverrideGFBRUL: rule.TargetGFBRUL,
+				OverrideGFBRDL: rule.TargetGFBRDL,
 				OverrideMBRUL:  rule.OverrideMBRUL,
 				OverrideMBRDL:  rule.OverrideMBRDL,
 				Duration:       rule.Duration,
@@ -1036,6 +1094,10 @@ func (d *Driver) selectAdaptiveProfile(report AdaptiveReport) (*AdaptiveProfile,
 		ProfileID:      "adaptive-default",
 		OverrideGateUL: boolPtr(true),
 		OverrideGateDL: boolPtr(true),
+		OverrideGFBRUL: 100000,
+		OverrideGFBRDL: 100000,
+		OverrideMBRUL:  100000,
+		OverrideMBRDL:  100000,
 		Duration:       d.defaultAdaptiveDuration(),
 	}, "fallback=adaptive-default"
 }
@@ -1051,6 +1113,155 @@ func adaptiveRuleMatches(rule factory.AdaptiveQoSRule, report AdaptiveReport) bo
 		return false
 	}
 	return true
+}
+
+func derivePredictiveBurstDecision(report AdaptiveReport, cp *adaptiveCPProvisionedRange) *adaptiveQoSDecisionView {
+	windowMs := report.DeadlineMs
+	if windowMs == 0 || (report.BurstDurationMs > 0 && report.BurstDurationMs > windowMs) {
+		windowMs = report.BurstDurationMs
+	}
+	if windowMs == 0 {
+		windowMs = 150
+	}
+	requiredDL := rateFromBurst(report.BurstSize, windowMs)
+	requiredUL := requiredDL / 8
+	if requiredUL == 0 && requiredDL > 0 {
+		requiredUL = requiredDL / 4
+	}
+	if requiredUL == 0 {
+		requiredUL = 100_000
+	}
+	if cp != nil {
+		if cp.AuthorizationMaxBitrateDL > 0 && requiredDL > cp.AuthorizationMaxBitrateDL {
+			requiredDL = cp.AuthorizationMaxBitrateDL
+		}
+		if cp.AuthorizationMaxBitrateUL > 0 && requiredUL > cp.AuthorizationMaxBitrateUL {
+			requiredUL = cp.AuthorizationMaxBitrateUL
+		}
+	}
+	gate := true
+	gfbrDL := requiredDL * 3 / 4
+	gfbrUL := requiredUL * 3 / 4
+	if gfbrDL == 0 && requiredDL > 0 {
+		gfbrDL = requiredDL
+	}
+	if gfbrUL == 0 && requiredUL > 0 {
+		gfbrUL = requiredUL
+	}
+	return &adaptiveQoSDecisionView{
+		SelectedProfileID:            "burst-protect",
+		DecisionReason:               buildPredictiveBurstDecisionReason(report, requiredDL, requiredUL),
+		OverrideGateUL:               &gate,
+		OverrideGateDL:               &gate,
+		OverrideGFBRUL:               gfbrUL,
+		OverrideGFBRDL:               gfbrDL,
+		DefaultGFBRUL:                defaultAdaptiveGFBR(),
+		DefaultGFBRDL:                defaultAdaptiveGFBR(),
+		OverrideMBRUL:                requiredUL,
+		OverrideMBRDL:                requiredDL,
+		DurationMs:                   report.DeadlineMsOrBurstDurationMs(),
+		RequestedTrafficPattern:      report.TrafficPattern,
+		RequestedLatencySensitivity:  report.LatencySensitivity,
+		RequestedPacketLossTolerance: report.PacketLossTolerance,
+		RequestedBurstSize:           report.BurstSize,
+		RequestedBurstDurationMs:     storyDurationMs(report.BurstDuration, report.BurstDurationMs),
+		RequestedDeadlineMs:          storyDurationMs(report.Deadline, report.DeadlineMs),
+		RequestedPriority:            inferBurstPriority(report),
+		RequestedBitrateDL:           rateFromBurst(report.BurstSize, windowMs),
+		RequestedBitrateUL:           rateFromBurst(report.BurstSize/8, windowMs),
+		RequestedArrivalTime:         report.expectedArrivalTime(),
+		DefaultProfileID:             defaultAdaptiveProfileID(),
+	}
+}
+
+func defaultAdaptiveGFBR() uint64 {
+	return 100000
+}
+
+func rateFromBurst(sizeBytes uint64, windowMs uint64) uint64 {
+	if sizeBytes == 0 {
+		return 0
+	}
+	if windowMs == 0 {
+		windowMs = 1
+	}
+	bits := sizeBytes * 8
+	return uint64((bits*1000 + windowMs - 1) / windowMs)
+}
+
+func buildPredictiveBurstDecisionReason(report AdaptiveReport, requiredDL, requiredUL uint64) string {
+	parts := []string{"scenario=predictive-burst"}
+	if report.BurstSize > 0 {
+		parts = append(parts, fmt.Sprintf("burst=%dB", report.BurstSize))
+	}
+	if ms := storyDurationMs(report.BurstDuration, report.BurstDurationMs); ms > 0 {
+		parts = append(parts, fmt.Sprintf("burstDuration=%dms", ms))
+	}
+	if ms := storyDurationMs(report.Deadline, report.DeadlineMs); ms > 0 {
+		parts = append(parts, fmt.Sprintf("deadline=%dms", ms))
+	}
+	if report.Priority != "" {
+		parts = append(parts, "priority="+report.Priority)
+	}
+	if !report.ExpectedArrivalTime.IsZero() {
+		parts = append(parts, "arrival="+report.ExpectedArrivalTime.UTC().Format(time.RFC3339Nano))
+	}
+	parts = append(parts, fmt.Sprintf("requestedDL=%d", requiredDL))
+	parts = append(parts, fmt.Sprintf("requestedUL=%d", requiredUL))
+	return strings.Join(parts, " ")
+}
+
+func inferBurstPriority(report AdaptiveReport) string {
+	if report.Priority != "" {
+		return report.Priority
+	}
+	if report.DeadlineMs > 0 && report.DeadlineMs <= 150 {
+		return "high"
+	}
+	return "normal"
+}
+
+func derivePredictedAirDelay(report AdaptiveReport) uint64 {
+	if report.DeadlineMs > 0 {
+		if report.DeadlineMs <= 50 {
+			return 4
+		}
+		if report.DeadlineMs <= 150 {
+			return 8
+		}
+		return 16
+	}
+	if report.BurstDurationMs > 0 {
+		if report.BurstDurationMs <= 100 {
+			return 8
+		}
+		return 16
+	}
+	return 8
+}
+
+func deriveBlockSuccessRatio(report AdaptiveReport) float64 {
+	if report.BurstSize >= 8<<20 {
+		return 0.96
+	}
+	if report.BurstSize >= 4<<20 {
+		return 0.99
+	}
+	return 0.995
+}
+
+func (r AdaptiveReport) DeadlineMsOrBurstDurationMs() uint64 {
+	if ms := storyDurationMs(r.Deadline, r.DeadlineMs); ms > 0 {
+		return ms
+	}
+	return storyDurationMs(r.BurstDuration, r.BurstDurationMs)
+}
+
+func (r AdaptiveReport) expectedArrivalTime() time.Time {
+	if !r.ExpectedArrivalTime.IsZero() {
+		return r.ExpectedArrivalTime.UTC()
+	}
+	return r.Timestamp.Add(time.Duration(r.BurstDurationMs) * time.Millisecond)
 }
 
 func collectAdaptiveQERIDs(sess *SessionState) []uint32 {

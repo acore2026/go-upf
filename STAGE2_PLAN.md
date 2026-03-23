@@ -305,6 +305,32 @@ Add demo-focused internal types for:
 - userspace-only scope remains intact
 - fake gNB/demo logic stays isolated behind config or demo mode
 
+## Demo Runbook
+
+Use these commands from the host when the stack is already up and the UE, sidecar, and UPF containers are running.
+
+### Run Story 1
+```bash
+curl -s -X POST http://127.0.0.1:8082/api/sidecar/demo/story1/start \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+### Clear Story 1 State
+```bash
+curl -s -X POST http://127.0.0.1:8082/api/reset \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+### Verify State
+```bash
+curl -s http://127.0.0.1:8082/api/sidecar/status
+curl -s http://127.0.0.1:8082/api/upf/debug/adaptive-qos/status
+```
+
+If the story returns `SESSION_NOT_FOUND`, the core session is stale. Restart `free5gc-amf`, `free5gc-smf`, `ueransim`, and `ue`, then run Story 1 again.
+
 ## Assumptions And Defaults
 - The Stage 2 webpage is a separate demo app, not embedded in sidecar or UPF.
 - The fake gNB is implemented inside the UPF adaptive QoS controller.
