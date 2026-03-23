@@ -3,21 +3,19 @@ package userspace
 import "time"
 
 type adaptiveStoryView struct {
-	Scenario            string                      `json:"scenario,omitempty"`
-	FlowID              string                      `json:"flowId,omitempty"`
-	Phase               string                      `json:"phase,omitempty"`
-	ProfileID           string                      `json:"profileId,omitempty"`
-	DefaultProfileID    string                      `json:"defaultProfileId,omitempty"`
-	PreviousProfileID   string                      `json:"previousProfileId,omitempty"`
-	DecisionReason      string                      `json:"decisionReason,omitempty"`
-	CPProvisionedRange  *adaptiveCPProvisionedRange `json:"cpProvisionedRange,omitempty"`
-	QoSDecision         *adaptiveQoSDecisionView    `json:"qosDecision,omitempty"`
-	GNBDecision         string                      `json:"gnbDecision,omitempty"`
-	PredictedAirDelayMs uint64                      `json:"predictedAirDelayMs,omitempty"`
-	BlockSuccessRatio   float64                     `json:"blockSuccessRatio,omitempty"`
-	BurstSize           uint64                      `json:"burstSize,omitempty"`
-	BurstDurationMs     uint64                      `json:"burstDurationMs,omitempty"`
-	DeadlineMs          uint64                      `json:"deadlineMs,omitempty"`
+	Scenario            string  `json:"scenario,omitempty"`
+	FlowID              string  `json:"flowId,omitempty"`
+	Phase               string  `json:"phase,omitempty"`
+	ProfileID           string  `json:"profileId,omitempty"`
+	DefaultProfileID    string  `json:"defaultProfileId,omitempty"`
+	PreviousProfileID   string  `json:"previousProfileId,omitempty"`
+	DecisionReason      string  `json:"decisionReason,omitempty"`
+	GNBDecision         string  `json:"gnbDecision,omitempty"`
+	PredictedAirDelayMs uint64  `json:"predictedAirDelayMs,omitempty"`
+	BlockSuccessRatio   float64 `json:"blockSuccessRatio,omitempty"`
+	BurstSize           uint64  `json:"burstSize,omitempty"`
+	BurstDurationMs     uint64  `json:"burstDurationMs,omitempty"`
+	DeadlineMs          uint64  `json:"deadlineMs,omitempty"`
 }
 
 func (d *Driver) currentStoryView() *adaptiveStoryView {
@@ -47,8 +45,6 @@ func (d *Driver) currentStoryView() *adaptiveStoryView {
 		DefaultProfileID:    defaultAdaptiveProfileID(),
 		PreviousProfileID:   latest.PreviousProfileID,
 		DecisionReason:      latest.DecisionReason,
-		CPProvisionedRange:  latest.CPProvisionedRange,
-		QoSDecision:         flowQoSDecision(latest),
 		GNBDecision:         latest.GNBDecision,
 		PredictedAirDelayMs: latest.PredictedAirDelayMs,
 		BlockSuccessRatio:   latest.BlockSuccessRatio,

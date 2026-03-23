@@ -307,6 +307,8 @@ Add demo-focused internal types for:
 
 ## Demo Runbook
 
+For a self-contained execution guide, see [STORY1_TEST_BACKGROUND_METHODS.md](/root/proj/go/free5gc-compose/base/free5gc/NFs/upf/STORY1_TEST_BACKGROUND_METHODS.md).
+
 Use these commands from the host when the stack is already up and the UE, sidecar, and UPF containers are running.
 
 ### Run Story 1

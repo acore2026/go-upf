@@ -21,6 +21,9 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+//go:embed webapp/dist/*
+var webappFiles embed.FS
+
 type app struct {
 	sidecarBase *url.URL
 	upfBase     *url.URL
@@ -29,6 +32,8 @@ type app struct {
 	client      *http.Client
 	static      http.Handler
 	staticFS    fs.FS
+	webapp      http.Handler
+	webappFS    fs.FS
 	resetMu     sync.Mutex
 }
 
@@ -57,6 +62,13 @@ func main() {
 		panic(fmt.Errorf("load static files: %w", err))
 	}
 
+	webappRoot, err := fs.Sub(webappFiles, "webapp/dist")
+	if err != nil {
+		// It's okay if webapp is not built yet during development
+		fmt.Printf("Warning: webapp/dist not found, webapp route will be empty: %v\n", err)
+		webappRoot = os.DirFS(".") // dummy
+	}
+
 	a := &app{
 		sidecarBase: sidecarURL,
 		upfBase:     upfURL,
@@ -70,6 +82,8 @@ func main() {
 		},
 		static:   http.FileServer(http.FS(staticRoot)),
 		staticFS: staticRoot,
+		webapp:   http.FileServer(http.FS(webappRoot)),
+		webappFS: webappRoot,
 	}
 
 	server := &http.Server{
@@ -77,6 +91,10 @@ func main() {
 		Handler:           a.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	fmt.Printf("Starting adaptive-qos-demo on %s\n", listenAddr)
+	fmt.Printf("Static UI: http://%s/\n", listenAddr)
+	fmt.Printf("React Webapp: http://%s/webapp/\n", listenAddr)
+
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		panic(err)
 	}
@@ -87,6 +105,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("/api/reset", a.handleReset)
 	mux.HandleFunc("/api/sidecar/", a.handleSidecarProxy)
 	mux.HandleFunc("/api/upf/", a.handleUPFProxy)
+	mux.HandleFunc("/webapp/", a.handleWebapp)
 	mux.HandleFunc("/", a.handleStatic)
 	return mux
 }
@@ -104,6 +123,37 @@ func (a *app) handleStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.static.ServeHTTP(w, r)
+}
+
+func (a *app) handleWebapp(w http.ResponseWriter, r *http.Request) {
+	// If path is exactly /webapp, redirect to /webapp/
+	if r.URL.Path == "/webapp" {
+		http.Redirect(w, r, "/webapp/", http.StatusMovedPermanently)
+		return
+	}
+
+	// Serve the index.html for any path under /webapp/ to support client-side routing
+	// But first check if the file exists
+	relPath := strings.TrimPrefix(r.URL.Path, "/webapp/")
+	if relPath == "" {
+		relPath = "index.html"
+	}
+
+	_, err := fs.Stat(a.webappFS, relPath)
+	if err != nil {
+		// If file not found, serve index.html (fallback for SPA)
+		b, err := fs.ReadFile(a.webappFS, "index.html")
+		if err != nil {
+			http.Error(w, "Webapp index.html not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+		return
+	}
+
+	http.StripPrefix("/webapp/", a.webapp).ServeHTTP(w, r)
 }
 
 func (a *app) handleSidecarProxy(w http.ResponseWriter, r *http.Request) {

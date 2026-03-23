@@ -25,6 +25,7 @@ const (
 	adaptiveDefaultMASQUEBind = "127.0.0.1"
 	adaptiveDefaultReportBind = "127.0.0.1"
 	adaptiveDefaultTraceLimit = 256
+	adaptiveAutoEndGrace      = 750 * time.Millisecond
 )
 
 const (
@@ -189,11 +190,16 @@ type adaptiveQoSController struct {
 	debugLn   net.Listener
 	server    *http3.Server
 	debugSrv  *http.Server
-	proxy     masque.Proxy
+	proxy     masqueProxy
 	running   bool
 	closeOnce sync.Once
 	debugMu   sync.RWMutex
 	debugErr  string
+}
+
+type masqueProxy interface {
+	ProxyConnectedSocket(http.ResponseWriter, *masque.Request, *net.UDPConn) error
+	Close() error
 }
 
 type adaptiveDebugStatus struct {
@@ -206,6 +212,8 @@ type adaptiveDebugStatus struct {
 	DefaultProfileID   string                      `json:"defaultProfileId,omitempty"`
 	CPProvisionedRange *adaptiveCPProvisionedRange `json:"cpProvisionedRange,omitempty"`
 	QoSDecision        *adaptiveQoSDecisionView    `json:"qosDecision,omitempty"`
+	CurrentQoSProfile  *adaptiveQoSDecisionView    `json:"currentQoSProfile,omitempty"`
+	DefaultQoSProfile  *adaptiveQoSDecisionView    `json:"defaultQoSProfile,omitempty"`
 	ServeError         string                      `json:"serveError,omitempty"`
 }
 
@@ -298,6 +306,7 @@ func newAdaptiveQoSController(d *Driver, cfg *factory.Config) *adaptiveQoSContro
 		cfg:      &localCfg,
 		certFile: cfg.GetAdaptiveQoSCertPemPath(),
 		keyFile:  cfg.GetAdaptiveQoSCertKeyPath(),
+		proxy:    &masque.Proxy{},
 	}
 }
 
@@ -453,6 +462,8 @@ func (c *adaptiveQoSController) handleDebugStatus(w http.ResponseWriter, _ *http
 		DefaultProfileID:   defaultAdaptiveProfileID(),
 		CPProvisionedRange: flowCPProvisionedRange(latestFlow),
 		QoSDecision:        flowQoSDecision(latestFlow),
+		CurrentQoSProfile:  currentQoSProfileView(latestFlow),
+		DefaultQoSProfile:  defaultQoSProfileView(latestFlow),
 		ServeError:         c.debugServeError(),
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -630,6 +641,44 @@ func flowQoSDecision(flow *AdaptiveFlowState) *adaptiveQoSDecisionView {
 	}
 }
 
+func currentQoSProfileView(flow *AdaptiveFlowState) *adaptiveQoSDecisionView {
+	return flowQoSDecision(flow)
+}
+
+func defaultQoSProfileView(flow *AdaptiveFlowState) *adaptiveQoSDecisionView {
+	base := &AdaptiveProfile{
+		ProfileID:      defaultAdaptiveProfileID(),
+		OverrideGateUL: boolPtr(true),
+		OverrideGateDL: boolPtr(true),
+		OverrideGFBRUL: 100000,
+		OverrideGFBRDL: 100000,
+		OverrideMBRUL:  100000,
+		OverrideMBRDL:  100000,
+		Duration:       defaultAdaptiveDurationForFlow(flow),
+	}
+	return &adaptiveQoSDecisionView{
+		SelectedProfileID: base.ProfileID,
+		DecisionReason:    "fallback=adaptive-default",
+		OverrideGateUL:    base.OverrideGateUL,
+		OverrideGateDL:    base.OverrideGateDL,
+		OverrideGFBRUL:    base.OverrideGFBRUL,
+		OverrideGFBRDL:    base.OverrideGFBRDL,
+		DefaultGFBRUL:     base.OverrideGFBRUL,
+		DefaultGFBRDL:     base.OverrideGFBRDL,
+		OverrideMBRUL:     base.OverrideMBRUL,
+		OverrideMBRDL:     base.OverrideMBRDL,
+		DurationMs:        uint64(base.Duration / time.Millisecond),
+		DefaultProfileID:  base.ProfileID,
+	}
+}
+
+func defaultAdaptiveDurationForFlow(flow *AdaptiveFlowState) time.Duration {
+	if flow == nil || flow.SelectedProfile == nil || flow.SelectedProfile.Duration <= 0 {
+		return 30 * time.Second
+	}
+	return flow.SelectedProfile.Duration
+}
+
 func formatRange(minV, maxV uint64) string {
 	if minV == 0 && maxV == 0 {
 		return "n/a"
@@ -709,30 +758,75 @@ func makeAdaptiveTLSConfig(certFile string, keyFile string) (*tls.Config, error)
 }
 
 func (c *adaptiveQoSController) handleMASQUE(w http.ResponseWriter, r *http.Request) {
+	if c.driver != nil {
+		defer c.driver.publishSnapshotLocked()
+	}
 	req, err := masque.ParseRequest(r, c.template)
 	if err != nil {
 		if parseErr, ok := err.(*masque.RequestParseError); ok {
+			c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+				Timestamp:  time.Now().UTC(),
+				Stage:      "masque-connect-failed",
+				Status:     "rejected",
+				ReasonCode: fmt.Sprintf("MASQUE_PARSE_%d", parseErr.HTTPStatus),
+			})
 			w.WriteHeader(parseErr.HTTPStatus)
 			return
 		}
+		c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+			Timestamp:  time.Now().UTC(),
+			Stage:      "masque-connect-failed",
+			Status:     "rejected",
+			ReasonCode: "MASQUE_PARSE_ERROR",
+		})
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	if c.reportLn == nil {
+		c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+			Timestamp:  time.Now().UTC(),
+			Stage:      "masque-connect-failed",
+			Status:     "rejected",
+			ReasonCode: "MASQUE_REPORT_UNAVAILABLE",
+		})
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 	conn, err := net.DialUDP("udp", nil, c.reportLn.LocalAddr().(*net.UDPAddr))
 	if err != nil {
+		c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+			Timestamp:  time.Now().UTC(),
+			Stage:      "masque-connect-failed",
+			Status:     "rejected",
+			ReasonCode: "MASQUE_DIAL_FAILED",
+		})
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 	if req == nil {
+		c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+			Timestamp:  time.Now().UTC(),
+			Stage:      "masque-connect-failed",
+			Status:     "rejected",
+			ReasonCode: "MASQUE_REQUEST_MISSING",
+		})
 		w.WriteHeader(http.StatusBadRequest)
 		_ = conn.Close()
 		return
 	}
+	c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+		Timestamp:  time.Now().UTC(),
+		Stage:      "masque-connect",
+		Status:     "connected",
+		ReasonCode: "CONNECTED",
+	})
 	_ = c.proxy.ProxyConnectedSocket(w, req, conn)
+	c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+		Timestamp:  time.Now().UTC(),
+		Stage:      "masque-disconnect",
+		Status:     "disconnected",
+		ReasonCode: "DISCONNECTED",
+	})
 }
 
 func (c *adaptiveQoSController) reportLoop() {
@@ -798,7 +892,9 @@ func (c *adaptiveQoSController) close() {
 	}
 	c.closeOnce.Do(func() {
 		c.running = false
-		_ = c.proxy.Close()
+		if c.proxy != nil {
+			_ = c.proxy.Close()
+		}
 		if c.server != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			_ = c.server.Shutdown(ctx)
@@ -954,7 +1050,51 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 		ResponseMessage:     cloneAdaptiveFeedback(feedback),
 	})
 	d.publishSnapshotLocked()
+	d.scheduleAdaptiveFlowAutoEnd(report, report.Timestamp)
 	return feedback
+}
+
+func (d *Driver) scheduleAdaptiveFlowAutoEnd(report AdaptiveReport, startedAt time.Time) {
+	if d == nil || report.FlowID == "" || report.ExpectedArrivalTime.IsZero() {
+		return
+	}
+	deadline := report.ExpectedArrivalTime.Add(adaptiveAutoEndGrace)
+	delay := time.Until(deadline)
+	if delay < adaptiveAutoEndGrace {
+		delay = adaptiveAutoEndGrace
+	}
+	endReport := AdaptiveReport{
+		FlowID:     report.FlowID,
+		UEAddress:  report.UEAddress,
+		ReportType: AdaptiveReportTypeEnd,
+		Timestamp:  deadline,
+		Scenario:   report.Scenario,
+	}
+	time.AfterFunc(delay, func() {
+		if !d.isFlowStillCurrent(report.FlowID, startedAt) {
+			return
+		}
+		d.applyAdaptiveReport(endReport, time.Now().UTC())
+	})
+}
+
+func (d *Driver) isFlowStillCurrent(flowID string, startedAt time.Time) bool {
+	if d == nil || flowID == "" {
+		return false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, sess := range d.sessions {
+		if sess == nil {
+			continue
+		}
+		flow := sess.AdaptiveFlows[flowID]
+		if flow == nil {
+			continue
+		}
+		return flow.LatestReport.Timestamp.Equal(startedAt)
+	}
+	return false
 }
 
 func (d *Driver) endAdaptiveFlow(report AdaptiveReport, now time.Time) AdaptiveFeedback {

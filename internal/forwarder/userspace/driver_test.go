@@ -11,6 +11,9 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +36,8 @@ type testReportHandler struct {
 	reports []report.SessReport
 }
 
+type testMasqueProxy struct{}
+
 func (h *testReportHandler) NotifySessReport(sr report.SessReport) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -42,6 +47,14 @@ func (h *testReportHandler) NotifySessReport(sr report.SessReport) {
 func (h *testReportHandler) PopBufPkt(uint64, uint16) ([]byte, bool) {
 	return nil, false
 }
+
+func (p *testMasqueProxy) ProxyConnectedSocket(w http.ResponseWriter, _ *masque.Request, conn *net.UDPConn) error {
+	defer conn.Close()
+	w.WriteHeader(http.StatusOK)
+	return nil
+}
+
+func (p *testMasqueProxy) Close() error { return nil }
 
 func TestNewStartsConfiguredWorkers(t *testing.T) {
 	var wg sync.WaitGroup
@@ -490,6 +503,187 @@ func TestApplyAdaptiveReportPredictiveBurstReturnsStoryFeedback(t *testing.T) {
 	require.Equal(t, uint64(41943040), qos.OverrideMBRUL)
 	require.Equal(t, "high", qos.RequestedPriority)
 	require.True(t, strings.Contains(qos.DecisionReason, "requestedDL=335544320"))
+}
+
+func TestAdaptiveQoSStatusExposesCurrentAndDefaultProfiles(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+	seedAdaptiveSession(t, driver, 104, "60.60.0.104", 10)
+
+	now := time.Now().UTC()
+	feedback := driver.applyAdaptiveReport(AdaptiveReport{
+		UEAddress:      "60.60.0.104",
+		FlowID:         "story1-flow-status",
+		ReportType:     AdaptiveReportTypeIntent,
+		Timestamp:      now,
+		Scenario:       "predictive-burst",
+		TrafficPattern: "burst",
+		BurstSize:      6 << 20,
+		DeadlineMs:     150,
+	}, now)
+	require.Equal(t, AdaptiveFeedbackStatusStarted, feedback.Status)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/debug/adaptive-qos/status", nil)
+	driver.adaptiveQoS.handleDebugStatus(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var status adaptiveDebugStatus
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &status))
+	require.NotNil(t, status.Story)
+	require.NotNil(t, status.QoSDecision)
+	require.NotNil(t, status.CurrentQoSProfile)
+	require.NotNil(t, status.DefaultQoSProfile)
+	require.Equal(t, status.QoSDecision.SelectedProfileID, status.CurrentQoSProfile.SelectedProfileID)
+	require.Equal(t, "adaptive-default", status.DefaultQoSProfile.SelectedProfileID)
+	require.Equal(t, uint64(100000), status.DefaultQoSProfile.OverrideGFBRDL)
+	require.Equal(t, uint64(100000), status.DefaultQoSProfile.OverrideGFBRUL)
+}
+
+func TestAdaptiveQoSAutoEndsFlowAfterExpectedArrival(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+	seedAdaptiveSession(t, driver, 105, "60.60.0.105", 11)
+
+	startedAt := time.Now().UTC()
+	feedback := driver.applyAdaptiveReport(AdaptiveReport{
+		UEAddress:           "60.60.0.105",
+		FlowID:              "flow-auto-end",
+		ReportType:          AdaptiveReportTypeIntent,
+		Timestamp:           startedAt,
+		Scenario:            "predictive-burst",
+		TrafficPattern:      "burst",
+		BurstSize:           6 << 20,
+		DeadlineMs:          150,
+		ExpectedArrivalTime: startedAt.Add(25 * time.Millisecond),
+	}, startedAt)
+	require.Equal(t, AdaptiveFeedbackStatusStarted, feedback.Status)
+
+	require.Eventually(t, func() bool {
+		snapshot := driver.Snapshot()
+		for _, sess := range snapshot.Sessions {
+			if sess == nil {
+				continue
+			}
+			if _, ok := sess.AdaptiveFlows["flow-auto-end"]; ok {
+				return false
+			}
+		}
+		return true
+	}, 3*time.Second, 50*time.Millisecond)
+
+	snapshot := driver.Snapshot()
+	foundCleared := false
+	for _, event := range snapshot.AdaptiveTrace {
+		if event.FlowID == "flow-auto-end" && event.Stage == "upf-profile-cleared" {
+			foundCleared = true
+			break
+		}
+	}
+	require.True(t, foundCleared, "expected auto-end trace event")
+}
+
+func TestAdaptiveQoSMASQUEConnectAndDisconnectTrace(t *testing.T) {
+	certFile, keyFile, _ := writeAdaptiveQoSTestCerts(t)
+
+	driver, err := New(nil, &factory.Config{
+		Gtpu: &factory.Gtpu{
+			Forwarder: "userspace",
+			Userspace: &factory.Userspace{
+				Workers:   1,
+				QueueSize: 4,
+			},
+			AdaptiveQoS: &factory.AdaptiveQoS{
+				Enable:            true,
+				MASQUEBindAddress: "127.0.0.1",
+				MASQUEPort:        0,
+				TLS: &factory.Tls{
+					Pem: certFile,
+					Key: keyFile,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer driver.Close()
+	require.NotNil(t, driver.adaptiveQoS)
+	driver.adaptiveQoS.proxy = &testMasqueProxy{}
+
+	templateHost := driver.adaptiveQoS.template.Raw()
+	u, err := url.Parse(templateHost)
+	require.NoError(t, err)
+
+	req := &http.Request{
+		Method:     http.MethodConnect,
+		Host:       u.Host,
+		Proto:      "connect-udp",
+		ProtoMajor: 3,
+		ProtoMinor: 0,
+		URL: &url.URL{
+			Scheme:   "https",
+			Host:     u.Host,
+			Path:     "/masque",
+			RawQuery: "h=198.51.100.10&p=443",
+		},
+		Header: make(http.Header),
+	}
+
+	rec := httptest.NewRecorder()
+	driver.adaptiveQoS.handleMASQUE(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	snapshot := driver.Snapshot()
+	var sawConnect, sawDisconnect bool
+	for _, event := range snapshot.AdaptiveTrace {
+		if event.Stage == "masque-connect" && event.Status == "connected" {
+			sawConnect = true
+		}
+		if event.Stage == "masque-disconnect" && event.Status == "disconnected" {
+			sawDisconnect = true
+		}
+	}
+	require.True(t, sawConnect, "expected masque connect trace")
+	require.True(t, sawDisconnect, "expected masque disconnect trace")
 }
 
 func TestApplyAdaptiveReportEndClearsOverrides(t *testing.T) {
