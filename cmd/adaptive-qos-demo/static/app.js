@@ -239,7 +239,7 @@ function renderTimeline(events, lastReport, lastFeedback) {
         <summary>
           <div><time>${escapeHTML(formatTime(aligned.timestamp))}</time></div>
           <div>
-            <strong>${escapeHTML(`${aligned.component} · ${aligned.stage}`)}</strong>
+            <strong>${escapeHTML(`${aligned.component} · ${formatTraceStage(aligned.stage)}`)}</strong>
             <span>${escapeHTML(describeEvent(aligned))}</span>
           </div>
         </summary>
@@ -257,7 +257,7 @@ function renderLiveView(story, lastReport, lastFeedback, liveStage, timeline) {
     ["Default profile", story.defaultProfileId || "adaptive-default"],
     ["Current scenario", story.scenario || lastReport.scenario || "not available"],
     ["Burst window", formatTime(lastReport.expectedArrivalTime)],
-    ["Latest event", latestEvent ? `${latestEvent.component} · ${latestEvent.stage}` : "waiting for activity"],
+    ["Latest event", latestEvent ? `${latestEvent.component} · ${formatTraceStage(latestEvent.stage)}` : "waiting for activity"],
   ];
   fields.liveSummary.innerHTML = chips.map(([title, value]) => `
     <div class="summary-chip">
@@ -313,6 +313,13 @@ function describeEvent(event) {
     return "No extra detail";
   }
   return parts.join(" · ");
+}
+
+function formatTraceStage(stage) {
+  if (!stage) {
+    return "EVENT";
+  }
+  return String(stage).replace(/_/g, " ").toUpperCase();
 }
 
 function alignTraceEvent(event, lastReport, lastFeedback) {

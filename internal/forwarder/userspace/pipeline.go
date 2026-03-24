@@ -129,7 +129,7 @@ func (d *Driver) processDownlink(packet Packet, result PacketResult) PacketResul
 		ueIP = meta.DstIP
 	}
 
-	result.Binding = d.matchDownlink(ueIP, meta)
+	result.Binding, result.MatchedAdaptiveFlow = d.matchDownlink(ueIP, meta)
 	if result.Binding == nil {
 		logger.FwderLog.Debugf("userspace downlink miss: ue=%s src=%s dst=%s", ueIP, meta.SrcIP, meta.DstIP)
 		result.Err = errors.New("userspace: packet did not match any downlink PDR")
@@ -148,6 +148,24 @@ func (d *Driver) processDownlink(packet Packet, result PacketResult) PacketResul
 
 	switch result.Action {
 	case PacketActionForward:
+		if result.MatchedAdaptiveFlow != nil {
+			// Found a match! Log it.
+			result.MatchedAdaptiveFlow.PacketCount.Add(1)
+			d.mu.Lock()
+			d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+				Timestamp:       time.Now().UTC(),
+				SEID:            result.Binding.SEID,
+				UEAddress:       ueIP.String(),
+				FlowID:          result.MatchedAdaptiveFlow.FlowID,
+				FlowDescription: result.MatchedAdaptiveFlow.FlowDescription,
+				Stage:           "burst-packet-detected",
+				DecisionReason:  "detected packet matching flow 5-tuple on N6",
+			})
+			d.publishSnapshotLocked()
+			d.mu.Unlock()
+			logger.FwderLog.Infof("BURST PACKET MATCHED: flowId=%s ue=%s desc=%s", result.MatchedAdaptiveFlow.FlowID, ueIP, result.MatchedAdaptiveFlow.FlowDescription)
+		}
+
 		outcome, err := d.forwardDownlink(result.Binding, packet.Payload)
 		if err != nil {
 			logger.FwderLog.Debugf("userspace downlink forward error: pdr=%d ue=%s src=%s dst=%s err=%v", result.Binding.PDR.ID, ueIP, meta.SrcIP, meta.DstIP, err)

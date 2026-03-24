@@ -22,12 +22,13 @@ type RuntimeSnapshot struct {
 }
 
 type PDRBinding struct {
-	SEID uint64
-	PDR  *PDRRule
-	FAR  *FARRule
-	QERs []*QERRule
-	URRs []*URRRule
-	BAR  *BARRule
+	SEID                uint64
+	PDR                 *PDRRule
+	FAR                 *FARRule
+	QERs                []*QERRule
+	URRs                []*URRRule
+	BAR                 *BARRule
+	MatchedAdaptiveFlow *AdaptiveFlowState
 }
 
 func newRuntimeSnapshot() *RuntimeSnapshot {
@@ -108,6 +109,13 @@ func buildRuntimeSnapshot(sessions map[uint64]*SessionState, trace []AdaptiveTra
 			}
 			if len(pdr.PDI.UEIPv4) > 0 && isCorePDR(pdr) {
 				key := pdr.PDI.UEIPv4.String()
+				// Associate ALL active adaptive flows of this session with this PDR binding.
+				// Since PDRBinding currently only supports one MatchedAdaptiveFlow, we take the first one.
+				// In a real scenario with multiple active flows, we'd need a more complex mapping.
+				for _, flow := range sess.AdaptiveFlows {
+					binding.MatchedAdaptiveFlow = flow
+					break
+				}
 				snapshot.Downlink[key] = append(snapshot.Downlink[key], binding)
 			}
 		}
@@ -244,20 +252,25 @@ func selectUplinkBinding(bindings []*PDRBinding, ueIP net.IP, meta *packetMeta) 
 }
 
 func (d *Driver) MatchDownlink(ueIP net.IP) *PDRBinding {
-	return d.matchDownlink(ueIP, nil)
+	binding, _ := d.matchDownlink(ueIP, nil)
+	return binding
 }
 
-func (d *Driver) matchDownlink(ueIP net.IP, meta *packetMeta) *PDRBinding {
+func (d *Driver) matchDownlink(ueIP net.IP, meta *packetMeta) (*PDRBinding, *AdaptiveFlowState) {
 	if len(ueIP) == 0 {
-		return nil
+		return nil, nil
 	}
 	bindings := d.Snapshot().Downlink[ueIP.String()]
 	for _, binding := range bindings {
 		if matchSDF(binding, meta, PacketDirectionDownlink) {
-			return binding
+			// Check if this binding has an associated adaptive flow
+			if binding.MatchedAdaptiveFlow != nil {
+				return binding, binding.MatchedAdaptiveFlow
+			}
+			return binding, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func (d *Driver) ReportUsage(seid uint64, urrid uint32, reports []report.USAReport) error {

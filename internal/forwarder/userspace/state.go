@@ -86,11 +86,12 @@ type Packet struct {
 }
 
 type PacketResult struct {
-	WorkerID int
-	Action   PacketAction
-	Binding  *PDRBinding
-	Outcome  *PacketOutcome
-	Err      error
+	WorkerID            int
+	Action              PacketAction
+	Binding             *PDRBinding
+	Outcome             *PacketOutcome
+	MatchedAdaptiveFlow *AdaptiveFlowState
+	Err                 error
 }
 
 type packetJob struct {
@@ -166,9 +167,10 @@ type SessionState struct {
 	URRPeriodAt   map[uint32]time.Time
 	BARs          map[uint8]*BARRule
 	Buffers       map[uint16][][]byte
-	URRReports    map[uint32][]report.USAReport
-	AdaptiveFlows map[string]*AdaptiveFlowState
-	UpdatedAt     time.Time
+	URRReports         map[uint32][]report.USAReport
+	AdaptiveFlows      map[string]*AdaptiveFlowState
+	LastCPProvisioned  any
+	UpdatedAt          time.Time
 }
 
 func NewSessionState(seid uint64) *SessionState {

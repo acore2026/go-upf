@@ -105,6 +105,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [isInjecting, setIsInjecting] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   
   const traceRef = useRef<HTMLDivElement>(null);
@@ -119,16 +120,16 @@ export default function App() {
       ]);
 
       setSidecarStatus(sStatus);
-      setSidecarTrace(sTrace);
+      setSidecarTrace(sTrace || []);
       setUpfStatus(uStatus);
-      setUpfTrace(uTrace);
+      setUpfTrace(uTrace || []);
       setLastUpdate(new Date());
 
-      const derivedFlowId = flowId || sStatus.story?.flowId || "";
-      if (derivedFlowId) {
-        setFlowId(derivedFlowId);
-        const fDetail = await api.getFlowDetail(derivedFlowId);
+      if (flowId) {
+        const fDetail = await api.getFlowDetail(flowId);
         setFlow(fDetail);
+      } else {
+        setFlow(null);
       }
       setError(null);
     } catch (err: any) {
@@ -142,19 +143,28 @@ export default function App() {
     return () => clearInterval(interval);
   }, [flowId]);
 
-  // Auto-scroll trace to top (since we're prepending)
-  useEffect(() => {
-    if (traceRef.current) {
-      traceRef.current.scrollTop = 0;
-    }
-  }, [sidecarTrace, upfTrace]);
-
   const handleStartStory = async () => {
     setIsStarting(true);
     setError(null);
     try {
-      const resp = await api.startStory1();
-      setFlowId(resp.flowId || "story1-flow-1");
+      // crypto.randomUUID requires a secure context (HTTPS or localhost)
+      const randomId = typeof crypto.randomUUID === 'function' 
+        ? crypto.randomUUID().slice(0, 8) 
+        : Math.random().toString(36).substring(2, 10);
+        
+      const generatedFlowId = `flow-${randomId}`;
+      const resp = await api.startStory1({
+        flowId: generatedFlowId,
+        ueAddress: "10.60.0.1",
+        packet: {
+          srcIp: "10.60.0.1",
+          dstIp: "198.51.100.10",
+          srcPort: 40000,
+          dstPort: 9999,
+          protocol: "udp",
+        }
+      });
+      setFlowId(resp.flowId || generatedFlowId);
       await refreshAll();
     } catch (err: any) {
       setError(err.message);
@@ -178,6 +188,20 @@ export default function App() {
     }
   };
 
+  const handleInjectBurst = async () => {
+    if (!flowId) return;
+    setIsInjecting(true);
+    setError(null);
+    try {
+      await api.injectBurst("10.60.0.1", flowId);
+      await refreshAll();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsInjecting(false);
+    }
+  };
+
   const mergedTimeline = useMemo(() => {
     return [...sidecarTrace, ...upfTrace]
       .sort((a, b) => {
@@ -186,8 +210,15 @@ export default function App() {
         if (timeA !== timeB) return timeA - timeB;
         return (a.seq || 0) - (b.seq || 0);
       })
-      .slice(-40);
+      .slice(-100);
   }, [sidecarTrace, upfTrace]);
+
+  const formatTraceStage = (stage?: string) => {
+    if (!stage) {
+      return "EVENT";
+    }
+    return stage.replace(/_/g, ' ').toUpperCase();
+  };
 
   const story: StorySummary | undefined = upfStatus?.story || sidecarStatus?.story;
   const lastReport = flow?.lastReport || {};
@@ -234,6 +265,14 @@ export default function App() {
             >
               <RefreshCw size={16} strokeWidth={2.5} className={cn(isResetting ? 'animate-spin' : 'group-hover:rotate-45 transition-transform')} />
               <span>Reset Scene</span>
+            </button>
+            <button 
+              onClick={handleInjectBurst} 
+              disabled={isInjecting || !flowId}
+              className="group relative flex items-center gap-2 px-5 py-2.5 bg-emerald-600 border border-emerald-500 rounded-2xl text-[14px] font-bold text-white hover:bg-emerald-700 hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200"
+            >
+              <Activity size={16} strokeWidth={2.5} className={cn(isInjecting ? 'animate-pulse' : '')} />
+              <span>Send Burst Packet</span>
             </button>
             <button 
               onClick={handleStartStory} 
@@ -389,6 +428,7 @@ export default function App() {
           
           <Card title="Application Intent" icon={Smartphone} status={story?.phase ? 'active' : 'idle'}>
             <Metric label="Scenario" value={story?.scenario || 'None'} highlight={!!story?.scenario} />
+            <Metric label="Flow 5-tuple" value={story?.flowDescription || 'N/A'} highlight={!!story?.flowDescription} />
             <Metric label="Payload" value={formatBytes(lastReport.BurstSize || story?.burstSize)} />
             <Metric label="Deadline" value={story?.deadlineMs ? `${story.deadlineMs} ms` : 'N/A'} />
             <Metric label="Priority" value={lastReport.Priority || 'N/A'} />
@@ -401,19 +441,21 @@ export default function App() {
             <Metric label="Status" value={lastFeedback.Status || 'Standby'} />
           </Card>
 
-          <Card title="Policy Engine" icon={Settings} status={!!story?.profileId ? 'active' : 'idle'}>
+          <Card title="QoS Engine" icon={Settings} status={!!story?.profileId ? 'active' : 'idle'}>
             <Metric 
               label="Selected Profile" 
-              value={story?.profileId || 'default'} 
+              value={upfStatus?.currentQoSProfile?.selectedProfileId || upfStatus?.defaultQoSProfile?.selectedProfileId || 'default'} 
               highlight={!!story?.profileId}
-              subtext={upfStatus?.qosDecision?.decisionReason || 'Waiting for match'}
+              subtext={upfStatus?.currentQoSProfile?.decisionReason || upfStatus?.defaultQoSProfile?.decisionReason || 'Waiting for match'}
             />
-            <Metric label="GFBR DL" value={formatBitrate(upfStatus?.qosDecision?.overrideGfbrDl)} />
-            <Metric label="MBR DL" value={formatBitrate(upfStatus?.qosDecision?.overrideMbrDl)} />
+            <Metric label="GFBR DL" value={formatBitrate(upfStatus?.currentQoSProfile?.overrideGfbrDl || upfStatus?.defaultQoSProfile?.overrideGfbrDl)} />
+            <Metric label="MBR DL" value={formatBitrate(upfStatus?.currentQoSProfile?.overrideMbrDl || upfStatus?.defaultQoSProfile?.overrideMbrDl)} />
+            <Metric label="CP Auth Max DL" value={formatBitrate(upfStatus?.cpProvisionedRange?.authorizationMaxBitrateDl)} subtext="Limit from Control Plane" />
+            <Metric label="Packet Count" value={upfStatus?.story?.packetCount || 0} highlight={!!upfStatus?.story?.packetCount} />
             <Metric label="Decision" value={lastFeedback.ReasonCode || 'Pending'} />
           </Card>
 
-          <Card title="gNB Collaboration" icon={Wifi} status={story?.gnbDecision === 'ACCEPTED' ? 'active' : 'idle'}>
+          <Card title="RAN" icon={Wifi} status={story?.gnbDecision === 'ACCEPTED' ? 'active' : 'idle'}>
             <Metric 
               label="Decision" 
               value={story?.gnbDecision || 'PENDING'} 
@@ -510,7 +552,7 @@ export default function App() {
                           </span>
                         </div>
                         <h4 className="text-sm font-bold text-slate-800 tracking-tight leading-none mb-2">
-                          {ev.stage.replace(/_/g, ' ').toUpperCase()}
+                          {formatTraceStage(ev.stage)}
                         </h4>
                         {(ev.detail || ev.profileId || ev.status) && (
                           <div className="text-[12px] text-slate-500 leading-relaxed font-mono bg-slate-50/50 p-2 rounded-lg mt-1 group-hover:bg-white transition-colors">

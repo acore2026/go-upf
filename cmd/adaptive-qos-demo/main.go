@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -201,7 +202,20 @@ func (a *app) proxy(w http.ResponseWriter, r *http.Request, base *url.URL, prefi
 	target.Path = singleJoiningSlash(base.Path, strings.TrimPrefix(r.URL.Path, prefix))
 	target.RawQuery = r.URL.RawQuery
 
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer r.Body.Close()
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/demo/story1/start") {
+		body = augmentStory1RequestBody(body)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, r.Method, target.String(), bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -221,10 +235,50 @@ func (a *app) proxy(w http.ResponseWriter, r *http.Request, base *url.URL, prefi
 	_, _ = io.Copy(w, resp.Body)
 }
 
+func augmentStory1RequestBody(body []byte) []byte {
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body
+	}
+	if req == nil {
+		return body
+	}
+	if _, ok := req["packet"]; !ok {
+		srcIP := stringValue(req["ueAddress"], "10.60.0.1")
+		req["packet"] = map[string]any{
+			"srcIp":    srcIP,
+			"dstIp":    "198.51.100.10",
+			"srcPort":  40000,
+			"dstPort":  9999,
+			"protocol": "udp",
+		}
+	}
+	if _, ok := req["flowDescription"]; !ok {
+		req["flowDescription"] = "permit out udp from 10.60.0.1 40000 to 198.51.100.10 9999"
+	}
+	out, err := json.Marshal(req)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func stringValue(v any, fallback string) string {
+	if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+		return s
+	}
+	return fallback
+}
+
 func (a *app) callJSON(ctx context.Context, base *url.URL, rawPath, method string) error {
 	target := *base
 	target.Path = singleJoiningSlash(base.Path, strings.TrimPrefix(rawPath, "/"))
-	req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	callCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(callCtx, method, target.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -249,18 +303,20 @@ func (a *app) restartSidecar(ctx context.Context) error {
 		return fmt.Errorf("sidecar reset configuration missing")
 	}
 
-	_ = exec.CommandContext(ctx, "pkill", "-TERM", "-f", a.sidecarBin).Run()
+	killCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(killCtx, "pkill", "-TERM", "-f", a.sidecarBin).Run()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := a.callJSON(ctx, a.sidecarBase, "/status", http.MethodGet); err != nil {
+		if err := a.callJSON(context.Background(), a.sidecarBase, "/status", http.MethodGet); err != nil {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = exec.CommandContext(ctx, "pkill", "-KILL", "-f", a.sidecarBin).Run()
+	_ = exec.CommandContext(killCtx, "pkill", "-KILL", "-f", a.sidecarBin).Run()
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := a.callJSON(ctx, a.sidecarBase, "/status", http.MethodGet); err != nil {
+		if err := a.callJSON(context.Background(), a.sidecarBase, "/status", http.MethodGet); err != nil {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -273,7 +329,7 @@ func (a *app) restartSidecar(ctx context.Context) error {
 
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := a.callJSON(ctx, a.sidecarBase, "/status", http.MethodGet); err == nil {
+		if err := a.callJSON(context.Background(), a.sidecarBase, "/status", http.MethodGet); err == nil {
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)

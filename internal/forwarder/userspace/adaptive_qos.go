@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	masque "github.com/quic-go/masque-go"
@@ -40,22 +41,32 @@ const (
 )
 
 type AdaptiveReport struct {
-	UEAddress           string        `json:"ueAddress,omitempty"`
-	FlowID              string        `json:"flowId,omitempty"`
-	ReportType          string        `json:"reportType,omitempty"`
-	Timestamp           time.Time     `json:"timestamp,omitempty"`
-	Scenario            string        `json:"scenario,omitempty"`
-	TrafficPattern      string        `json:"trafficPattern,omitempty"`
-	LatencySensitivity  string        `json:"latencySensitivity,omitempty"`
-	PacketLossTolerance string        `json:"packetLossTolerance,omitempty"`
-	Priority            string        `json:"priority,omitempty"`
-	ExpectedArrivalTime time.Time     `json:"expectedArrivalTime,omitempty"`
-	BurstSize           uint64        `json:"burstSize,omitempty"`
-	BurstDuration       time.Duration `json:"burstDuration,omitempty"`
-	BurstDurationMs     uint64        `json:"burstDurationMs,omitempty"`
-	Deadline            time.Duration `json:"deadline,omitempty"`
-	DeadlineMs          uint64        `json:"deadlineMs,omitempty"`
-	SEIDHint            uint64        `json:"seidHint,omitempty"`
+	UEAddress           string           `json:"ueAddress,omitempty"`
+	FlowID              string           `json:"flowId,omitempty"`
+	ReportType          string           `json:"reportType,omitempty"`
+	Timestamp           time.Time        `json:"timestamp,omitempty"`
+	Scenario            string           `json:"scenario,omitempty"`
+	TrafficPattern      string           `json:"trafficPattern,omitempty"`
+	LatencySensitivity  string           `json:"latencySensitivity,omitempty"`
+	PacketLossTolerance string           `json:"packetLossTolerance,omitempty"`
+	Priority            string           `json:"priority,omitempty"`
+	ExpectedArrivalTime time.Time        `json:"expectedArrivalTime,omitempty"`
+	BurstSize           uint64           `json:"burstSize,omitempty"`
+	BurstDuration       time.Duration    `json:"burstDuration,omitempty"`
+	BurstDurationMs     uint64           `json:"burstDurationMs,omitempty"`
+	Deadline            time.Duration    `json:"deadline,omitempty"`
+	DeadlineMs          uint64           `json:"deadlineMs,omitempty"`
+	SEIDHint            uint64           `json:"seidHint,omitempty"`
+	Packet              *PacketFiveTuple `json:"packet,omitempty"`
+	FlowDescription     string           `json:"flowDescription,omitempty"`
+}
+
+type PacketFiveTuple struct {
+	SrcIP    string `json:"srcIp,omitempty"`
+	DstIP    string `json:"dstIp,omitempty"`
+	SrcPort  uint16 `json:"srcPort,omitempty"`
+	DstPort  uint16 `json:"dstPort,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
 }
 
 type AdaptiveFeedback struct {
@@ -68,6 +79,7 @@ type AdaptiveFeedback struct {
 	GNBDecision         string  `json:"gnbDecision,omitempty"`
 	PredictedAirDelayMs uint64  `json:"predictedAirDelayMs,omitempty"`
 	BlockSuccessRatio   float64 `json:"blockSuccessRatio,omitempty"`
+	PacketCount         uint64  `json:"packetCount,omitempty"`
 }
 
 type AdaptiveProfile struct {
@@ -96,6 +108,7 @@ type AdaptiveQEROverride struct {
 type AdaptiveFlowState struct {
 	FlowID              string
 	UEAddress           string
+	Packet              *PacketFiveTuple
 	AppliedQERIDs       []uint32
 	SelectedProfile     *AdaptiveProfile
 	PreviousProfileID   string
@@ -104,9 +117,12 @@ type AdaptiveFlowState struct {
 	LatestReport        AdaptiveReport
 	StoryPhase          string
 	Scenario            string
+	FlowDescription     string
+	ParsedFlowDesc      *SDFFilterRule
 	GNBDecision         string
 	PredictedAirDelayMs uint64
 	BlockSuccessRatio   float64
+	PacketCount         atomic.Uint64
 	UpdatedAt           time.Time
 }
 
@@ -115,6 +131,8 @@ type AdaptiveTraceEvent struct {
 	FlowID              string                      `json:"flowId,omitempty"`
 	UEAddress           string                      `json:"ueAddress,omitempty"`
 	SEID                uint64                      `json:"seid,omitempty"`
+	Packet              *PacketFiveTuple            `json:"packet,omitempty"`
+	FlowDescription     string                      `json:"flowDescription,omitempty"`
 	Stage               string                      `json:"stage,omitempty"`
 	Status              string                      `json:"status,omitempty"`
 	ReasonCode          string                      `json:"reasonCode,omitempty"`
@@ -123,6 +141,7 @@ type AdaptiveTraceEvent struct {
 	GNBDecision         string                      `json:"gnbDecision,omitempty"`
 	PredictedAirDelayMs uint64                      `json:"predictedAirDelayMs,omitempty"`
 	BlockSuccessRatio   float64                     `json:"blockSuccessRatio,omitempty"`
+	PacketCount         uint64                      `json:"packetCount,omitempty"`
 	PreviousProfileID   string                      `json:"previousProfileId,omitempty"`
 	DefaultProfileID    string                      `json:"defaultProfileId,omitempty"`
 	DecisionReason      string                      `json:"decisionReason,omitempty"`
@@ -224,6 +243,7 @@ type adaptiveDebugTraceEvent struct {
 	FlowID              string                      `json:"flowId,omitempty"`
 	UEAddress           string                      `json:"ueAddress,omitempty"`
 	SEID                uint64                      `json:"seid,omitempty"`
+	Packet              *PacketFiveTuple            `json:"packet,omitempty"`
 	Stage               string                      `json:"stage,omitempty"`
 	Status              string                      `json:"status,omitempty"`
 	Reason              string                      `json:"reason,omitempty"`
@@ -233,6 +253,7 @@ type adaptiveDebugTraceEvent struct {
 	GNBDecision         string                      `json:"gnbDecision,omitempty"`
 	PredictedAirDelayMs uint64                      `json:"predictedAirDelayMs,omitempty"`
 	BlockSuccessRatio   float64                     `json:"blockSuccessRatio,omitempty"`
+	PacketCount         uint64                      `json:"packetCount,omitempty"`
 	PreviousProfileID   string                      `json:"previousProfileId,omitempty"`
 	DefaultProfileID    string                      `json:"defaultProfileId,omitempty"`
 	DecisionReason      string                      `json:"decisionReason,omitempty"`
@@ -389,6 +410,7 @@ func (c *adaptiveQoSController) startDebugServer() error {
 	mux.HandleFunc("/debug/adaptive-qos/status", c.handleDebugStatus)
 	mux.HandleFunc("/debug/adaptive-qos/trace", c.handleDebugTrace)
 	mux.HandleFunc("/debug/adaptive-qos/reset", c.handleDebugReset)
+	mux.HandleFunc("/debug/adaptive-qos/inject-burst", c.handleDebugInjectBurst)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -495,6 +517,7 @@ func (c *adaptiveQoSController) handleDebugTrace(w http.ResponseWriter, r *http.
 			FlowID:              event.FlowID,
 			UEAddress:           event.UEAddress,
 			SEID:                event.SEID,
+			Packet:              event.Packet,
 			Stage:               event.Stage,
 			Status:              event.Status,
 			Reason:              event.ReasonCode,
@@ -504,6 +527,7 @@ func (c *adaptiveQoSController) handleDebugTrace(w http.ResponseWriter, r *http.
 			GNBDecision:         event.GNBDecision,
 			PredictedAirDelayMs: event.PredictedAirDelayMs,
 			BlockSuccessRatio:   event.BlockSuccessRatio,
+			PacketCount:         event.PacketCount,
 			PreviousProfileID:   event.PreviousProfileID,
 			DefaultProfileID:    event.DefaultProfileID,
 			DecisionReason:      event.DecisionReason,
@@ -547,6 +571,71 @@ func (c *adaptiveQoSController) handleDebugReset(w http.ResponseWriter, r *http.
 	})
 }
 
+type adaptiveDebugInjectRequest struct {
+	UEAddress string `json:"ueAddress"`
+	FlowID    string `json:"flowId"`
+}
+
+func (c *adaptiveQoSController) handleDebugInjectBurst(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req adaptiveDebugInjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.UEAddress == "" || req.FlowID == "" {
+		http.Error(w, "ueAddress and flowId required", http.StatusBadRequest)
+		return
+	}
+
+	c.driver.mu.RLock()
+	var flow *AdaptiveFlowState
+	for _, sess := range c.driver.sessions {
+		if sess == nil {
+			continue
+		}
+		if f := sess.AdaptiveFlows[req.FlowID]; f != nil {
+			flow = f
+			break
+		}
+	}
+	c.driver.mu.RUnlock()
+
+	if flow == nil {
+		http.Error(w, "flow not found", http.StatusNotFound)
+		return
+	}
+
+	// Determine destination port from flow description
+	dstPort := uint16(9999) // default
+	if flow.ParsedFlowDesc != nil && flow.ParsedFlowDesc.Destination != nil && len(flow.ParsedFlowDesc.Destination.Ports) > 0 {
+		dstPort = flow.ParsedFlowDesc.Destination.Ports[0].From
+	}
+
+	// Dial UDP to UE address on the specified port
+	addr := net.JoinHostPort(req.UEAddress, strconv.Itoa(int(dstPort)))
+	conn, err := net.Dial("udp", addr)
+	if err != nil {
+		http.Error(w, "failed to dial ue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer conn.Close()
+
+	payload := []byte(fmt.Sprintf("BURST_DATA_FOR_FLOW:%s", req.FlowID))
+	if _, err := conn.Write(payload); err != nil {
+		http.Error(w, "failed to send burst packet: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"injected"}`))
+}
+
 func formatAdaptiveTraceDetail(event AdaptiveTraceEvent) string {
 	parts := make([]string, 0, 14)
 	if event.ProfileID != "" {
@@ -558,11 +647,17 @@ func formatAdaptiveTraceDetail(event AdaptiveTraceEvent) string {
 	if event.DefaultProfileID != "" {
 		parts = append(parts, "defaultProfile="+event.DefaultProfileID)
 	}
+	if event.FlowDescription != "" {
+		parts = append(parts, "flow="+event.FlowDescription)
+	}
 	if event.Status != "" {
 		parts = append(parts, "status="+event.Status)
 	}
 	if event.ReasonCode != "" {
 		parts = append(parts, "reason="+event.ReasonCode)
+	}
+	if event.PacketCount > 0 {
+		parts = append(parts, "packets="+strconv.FormatUint(event.PacketCount, 10))
 	}
 	if event.DecisionReason != "" {
 		parts = append(parts, "decision="+event.DecisionReason)
@@ -691,6 +786,7 @@ func formatRange(minV, maxV uint64) string {
 
 func cloneAdaptiveReport(in AdaptiveReport) *AdaptiveReport {
 	out := in
+	out.Packet = clonePacketFiveTuple(in.Packet)
 	return &out
 }
 
@@ -699,11 +795,20 @@ func cloneAdaptiveFeedback(in AdaptiveFeedback) *AdaptiveFeedback {
 	return &out
 }
 
+func clonePacketFiveTuple(in *PacketFiveTuple) *PacketFiveTuple {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
 type adaptiveResetSummary struct {
 	GeneratedAt    time.Time
 	ActiveSessions int
 	ActiveFlows    int
 	TraceDepth     int
+	Status         string
 }
 
 func (b *adaptiveTraceBuffer) reset() {
@@ -731,10 +836,30 @@ func (d *Driver) resetAdaptiveState() adaptiveResetSummary {
 		for key := range sess.AdaptiveFlows {
 			delete(sess.AdaptiveFlows, key)
 		}
+		sess.LastCPProvisioned = nil
 		sess.touch()
 	}
 	if d.adaptiveTrace != nil {
 		d.adaptiveTrace.reset()
+		// Re-emit session events so they appear after clear
+		for seid, sess := range d.sessions {
+			ueAddress := ""
+			for _, pdr := range sess.PDRs {
+				if pdr != nil && pdr.PDI != nil && len(pdr.PDI.UEIPv4) > 0 {
+					ueAddress = pdr.PDI.UEIPv4.String()
+					break
+				}
+			}
+			d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+				Timestamp:      time.Now().UTC(),
+				SEID:           seid,
+				UEAddress:      ueAddress,
+				Stage:          "pdu-session-established",
+				Status:         "active",
+				DecisionReason: fmt.Sprintf("discovered session seid=%d ue=%s", seid, ueAddress),
+			})
+			d.emitCPProvisionedTraceLocked(sess)
+		}
 	}
 	d.publishSnapshotLocked()
 
@@ -743,7 +868,59 @@ func (d *Driver) resetAdaptiveState() adaptiveResetSummary {
 		ActiveSessions: len(d.sessions),
 		ActiveFlows:    0,
 		TraceDepth:     0,
+		Status:         "reset",
 	}
+}
+
+func (d *Driver) emitCPProvisionedTraceLocked(sess *SessionState) {
+	if sess == nil {
+		return
+	}
+	cp := d.collectCPProvisionedRange(sess)
+	if cp == nil || cp.QERCount == 0 {
+		return
+	}
+
+	// Deduplicate: check if this is the same as last emitted
+	if last, ok := sess.LastCPProvisioned.(*adaptiveCPProvisionedRange); ok {
+		if cpProvisionedEqual(last, cp) {
+			return
+		}
+	}
+	sess.LastCPProvisioned = cp
+
+	ueAddress := ""
+	for _, pdr := range sess.PDRs {
+		if pdr != nil && pdr.PDI != nil && len(pdr.PDI.UEIPv4) > 0 {
+			ueAddress = pdr.PDI.UEIPv4.String()
+			break
+		}
+	}
+
+	d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+		Timestamp:          time.Now().UTC(),
+		SEID:               sess.SEID,
+		UEAddress:          ueAddress,
+		Stage:              "pdu-session-qos-provisioned",
+		Status:             "provisioned",
+		DecisionReason:     fmt.Sprintf("seid=%d mbrDL=%d mbrUL=%d gfbrDL=%d gfbrUL=%d", sess.SEID, cp.AuthorizationMaxBitrateDL, cp.AuthorizationMaxBitrateUL, cp.AuthorizationMaxGFBRDL, cp.AuthorizationMaxGFBRUL),
+		CPProvisionedRange: cp,
+	})
+}
+
+func cpProvisionedEqual(a, b *adaptiveCPProvisionedRange) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.QERCount == b.QERCount &&
+		a.AuthorizationMaxBitrateUL == b.AuthorizationMaxBitrateUL &&
+		a.AuthorizationMaxBitrateDL == b.AuthorizationMaxBitrateDL &&
+		a.AuthorizationMaxGFBRUL == b.AuthorizationMaxGFBRUL &&
+		a.AuthorizationMaxGFBRDL == b.AuthorizationMaxGFBRDL &&
+		a.MBRULMin == b.MBRULMin &&
+		a.MBRULMax == b.MBRULMax &&
+		a.MBRDLMin == b.MBRDLMin &&
+		a.MBRDLMax == b.MBRDLMax
 }
 
 func makeAdaptiveTLSConfig(certFile string, keyFile string) (*tls.Config, error) {
@@ -815,17 +992,19 @@ func (c *adaptiveQoSController) handleMASQUE(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
-		Timestamp:  time.Now().UTC(),
-		Stage:      "masque-connect",
-		Status:     "connected",
-		ReasonCode: "CONNECTED",
+		Timestamp:      time.Now().UTC(),
+		Stage:          "masque-connect",
+		Status:         "connected",
+		ReasonCode:     "ADAPTIVE-QOS-REPORT",
+		DecisionReason: fmt.Sprintf("type=CONNECT-UDP local=%s remote=%s", conn.LocalAddr(), r.RemoteAddr),
 	})
 	_ = c.proxy.ProxyConnectedSocket(w, req, conn)
 	c.driver.addAdaptiveTraceLocked(AdaptiveTraceEvent{
-		Timestamp:  time.Now().UTC(),
-		Stage:      "masque-disconnect",
-		Status:     "disconnected",
-		ReasonCode: "DISCONNECTED",
+		Timestamp:      time.Now().UTC(),
+		Stage:          "masque-disconnect",
+		Status:         "disconnected",
+		ReasonCode:     "ADAPTIVE-QOS-FINALISED",
+		DecisionReason: fmt.Sprintf("type=CONNECT-UDP local=%s remote=%s", conn.LocalAddr(), r.RemoteAddr),
 	})
 }
 
@@ -918,9 +1097,13 @@ func (c *adaptiveQoSController) close() {
 }
 
 func (d *Driver) applyAdaptiveReport(report AdaptiveReport, now time.Time) AdaptiveFeedback {
+	logger.FwderLog.Debugf("adaptive report received: type=%s flowId=%s ue=%s scenario=%s desc=%q",
+		report.ReportType, report.FlowID, report.UEAddress, report.Scenario, report.FlowDescription)
+
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	report.normalize()
 	if report.ReportType == "" {
 		report.ReportType = AdaptiveReportTypeIntent
 	}
@@ -956,6 +1139,7 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 			Timestamp:        now,
 			FlowID:           report.FlowID,
 			UEAddress:        report.UEAddress,
+			Packet:           clonePacketFiveTuple(report.Packet),
 			Stage:            "session-resolve",
 			Status:           feedback.Status,
 			ReasonCode:       feedback.ReasonCode,
@@ -996,6 +1180,7 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 	flow := &AdaptiveFlowState{
 		FlowID:             report.FlowID,
 		UEAddress:          report.UEAddress,
+		Packet:             clonePacketFiveTuple(report.Packet),
 		AppliedQERIDs:      append([]uint32(nil), appliedQERIDs...),
 		SelectedProfile:    profile,
 		PreviousProfileID:  previousProfileID,
@@ -1003,7 +1188,13 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 		CPProvisionedRange: cpProvisionedRange,
 		LatestReport:       report,
 		Scenario:           report.Scenario,
+		FlowDescription:    report.FlowDescription,
 		UpdatedAt:          now,
+	}
+	if report.FlowDescription != "" {
+		if rule, err := parseFlowDescription(report.FlowDescription); err == nil {
+			flow.ParsedFlowDesc = rule
+		}
 	}
 
 	feedback = AdaptiveFeedback{
@@ -1033,6 +1224,8 @@ func (d *Driver) startAdaptiveFlow(report AdaptiveReport, now time.Time) Adaptiv
 		FlowID:              report.FlowID,
 		UEAddress:           report.UEAddress,
 		SEID:                seid,
+		Packet:              clonePacketFiveTuple(report.Packet),
+		FlowDescription:     report.FlowDescription,
 		Stage:               "upf-profile-applied",
 		Status:              feedback.Status,
 		ReasonCode:          feedback.ReasonCode,
@@ -1084,7 +1277,7 @@ func (d *Driver) isFlowStillCurrent(flowID string, startedAt time.Time) bool {
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	for _, sess := range d.sessions {
+	for seid, sess := range d.sessions {
 		if sess == nil {
 			continue
 		}
@@ -1092,8 +1285,13 @@ func (d *Driver) isFlowStillCurrent(flowID string, startedAt time.Time) bool {
 		if flow == nil {
 			continue
 		}
-		return flow.LatestReport.Timestamp.Equal(startedAt)
+		currentTs := flow.LatestReport.Timestamp
+		isEqual := currentTs.UnixNano() == startedAt.UnixNano()
+		logger.FwderLog.Debugf("adaptive qos flow check: id=%s seid=%d match=%v current=%v started=%v",
+			flowID, seid, isEqual, currentTs.Format(time.RFC3339Nano), startedAt.Format(time.RFC3339Nano))
+		return isEqual
 	}
+	logger.FwderLog.Debugf("adaptive qos flow check: id=%s not found in any session", flowID)
 	return false
 }
 
@@ -1121,15 +1319,18 @@ func (d *Driver) endAdaptiveFlow(report AdaptiveReport, now time.Time) AdaptiveF
 		feedback.Status = AdaptiveFeedbackStatusEnded
 		feedback.ReasonCode = "ENDED"
 		feedback.ProfileID = storyProfileID(flow)
+		feedback.PacketCount = flow.PacketCount.Load()
 		d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
 			Timestamp:        now,
 			FlowID:           report.FlowID,
 			UEAddress:        flow.UEAddress,
 			SEID:             sess.SEID,
+			Packet:           clonePacketFiveTuple(report.Packet),
 			Stage:            "upf-profile-cleared",
 			Status:           feedback.Status,
 			ReasonCode:       feedback.ReasonCode,
 			ProfileID:        feedback.ProfileID,
+			PacketCount:      feedback.PacketCount,
 			DefaultProfileID: defaultAdaptiveProfileID(),
 			RequestMessage:   cloneAdaptiveReport(report),
 			ResponseMessage:  cloneAdaptiveFeedback(feedback),
@@ -1142,6 +1343,7 @@ func (d *Driver) endAdaptiveFlow(report AdaptiveReport, now time.Time) AdaptiveF
 		Timestamp:        now,
 		FlowID:           report.FlowID,
 		UEAddress:        report.UEAddress,
+		Packet:           clonePacketFiveTuple(report.Packet),
 		Stage:            "upf-profile-clear-miss",
 		Status:           feedback.Status,
 		ReasonCode:       feedback.ReasonCode,
@@ -1402,6 +1604,45 @@ func (r AdaptiveReport) expectedArrivalTime() time.Time {
 		return r.ExpectedArrivalTime.UTC()
 	}
 	return r.Timestamp.Add(time.Duration(r.BurstDurationMs) * time.Millisecond)
+}
+
+func (r *AdaptiveReport) normalize() {
+	if r == nil {
+		return
+	}
+	if r.FlowDescription == "" {
+		r.FlowDescription = buildFlowDescription(r.Packet)
+	}
+}
+
+func buildFlowDescription(pkt *PacketFiveTuple) string {
+	if pkt == nil {
+		return ""
+	}
+	protocol := strings.ToLower(strings.TrimSpace(pkt.Protocol))
+	if protocol == "" {
+		protocol = "ip"
+	}
+	src := strings.TrimSpace(pkt.SrcIP)
+	dst := strings.TrimSpace(pkt.DstIP)
+	if src == "" && dst == "" {
+		return ""
+	}
+	srcToken := "any"
+	dstToken := "any"
+	if src != "" {
+		srcToken = src
+	}
+	if pkt.SrcPort != 0 {
+		srcToken = fmt.Sprintf("%s %d", srcToken, pkt.SrcPort)
+	}
+	if dst != "" {
+		dstToken = dst
+	}
+	if pkt.DstPort != 0 {
+		dstToken = fmt.Sprintf("%s %d", dstToken, pkt.DstPort)
+	}
+	return fmt.Sprintf("permit out %s from %s to %s", protocol, srcToken, dstToken)
 }
 
 func collectAdaptiveQERIDs(sess *SessionState) []uint32 {

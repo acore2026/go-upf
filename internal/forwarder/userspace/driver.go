@@ -1,6 +1,7 @@
 package userspace
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -216,6 +217,7 @@ func (d *Driver) CreateQER(seid uint64, req *ie.IE) error {
 	sess := d.ensureSessionLocked(seid)
 	sess.QERs[rule.ID] = rule
 	sess.touch()
+	d.emitCPProvisionedTraceLocked(sess)
 	d.publishSnapshotLocked()
 	return nil
 }
@@ -236,6 +238,7 @@ func (d *Driver) UpdateQER(seid uint64, req *ie.IE) error {
 	}
 	sess.QERs[rule.ID] = rule
 	sess.touch()
+	d.emitCPProvisionedTraceLocked(sess)
 	d.publishSnapshotLocked()
 	return nil
 }
@@ -552,6 +555,13 @@ func (d *Driver) ensureSessionLocked(seid uint64) *SessionState {
 	if !ok {
 		sess = NewSessionState(seid)
 		d.sessions[seid] = sess
+		d.addAdaptiveTraceLocked(AdaptiveTraceEvent{
+			Timestamp:      time.Now().UTC(),
+			SEID:           seid,
+			Stage:          "pdu-session-established",
+			Status:         "active",
+			DecisionReason: fmt.Sprintf("new session seid=%d", seid),
+		})
 	}
 	return sess
 }
