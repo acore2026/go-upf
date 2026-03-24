@@ -13,7 +13,8 @@ export function formatBytes(bytes?: number) {
 }
 
 export function formatBitrate(bps?: number) {
-  if (!bps) return 'N/A';
+  if (bps === undefined || bps === null) return 'N/A';
+  if (bps === 0) return '0 bps';
   if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`;
   if (bps >= 1_000) return `${(bps / 1_000).toFixed(0)} kbps`;
   return `${bps} bps`;
