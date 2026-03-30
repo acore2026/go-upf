@@ -26,7 +26,7 @@ const (
 	adaptiveDefaultMASQUEBind = "127.0.0.1"
 	adaptiveDefaultReportBind = "127.0.0.1"
 	adaptiveDefaultTraceLimit = 256
-	adaptiveAutoEndGrace      = 750 * time.Millisecond
+	adaptiveAutoEndGrace      = 10 * time.Second
 )
 
 const (
@@ -745,10 +745,10 @@ func defaultQoSProfileView(flow *AdaptiveFlowState) *adaptiveQoSDecisionView {
 		ProfileID:      defaultAdaptiveProfileID(),
 		OverrideGateUL: boolPtr(true),
 		OverrideGateDL: boolPtr(true),
-		OverrideGFBRUL: 100000,
-		OverrideGFBRDL: 100000,
-		OverrideMBRUL:  100000,
-		OverrideMBRDL:  100000,
+		OverrideGFBRUL: 1000000,
+		OverrideGFBRDL: 1000000,
+		OverrideMBRUL:  1000000,
+		OverrideMBRDL:  1000000,
 		Duration:       defaultAdaptiveDurationForFlow(flow),
 	}
 	return &adaptiveQoSDecisionView{
@@ -1436,10 +1436,10 @@ func (d *Driver) selectAdaptiveProfile(report AdaptiveReport, cp *adaptiveCPProv
 		ProfileID:      "adaptive-default",
 		OverrideGateUL: boolPtr(true),
 		OverrideGateDL: boolPtr(true),
-		OverrideGFBRUL: 100000,
-		OverrideGFBRDL: 100000,
-		OverrideMBRUL:  100000,
-		OverrideMBRDL:  100000,
+		OverrideGFBRUL: 1000000,
+		OverrideGFBRDL: 1000000,
+		OverrideMBRUL:  1000000,
+		OverrideMBRDL:  1000000,
 		Duration:       d.defaultAdaptiveDuration(),
 	}, "fallback=adaptive-default"
 }
@@ -1517,7 +1517,7 @@ func derivePredictiveBurstDecision(report AdaptiveReport, cp *adaptiveCPProvisio
 }
 
 func defaultAdaptiveGFBR() uint64 {
-	return 100000
+	return 1000000
 }
 
 func rateFromBurst(sizeBytes uint64, windowMs uint64) uint64 {

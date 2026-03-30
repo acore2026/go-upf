@@ -497,8 +497,8 @@ func TestApplyAdaptiveReportPredictiveBurstReturnsStoryFeedback(t *testing.T) {
 	require.Equal(t, "burst", qos.RequestedTrafficPattern)
 	require.Equal(t, uint64(335544320), qos.RequestedBitrateDL)
 	require.Equal(t, uint64(41943040), qos.RequestedBitrateUL)
-	require.Equal(t, uint64(100000), qos.DefaultGFBRDL)
-	require.Equal(t, uint64(100000), qos.DefaultGFBRUL)
+	require.Equal(t, uint64(1000000), qos.DefaultGFBRDL)
+	require.Equal(t, uint64(1000000), qos.DefaultGFBRUL)
 	require.Equal(t, uint64(335544320), qos.OverrideMBRDL)
 	require.Equal(t, uint64(41943040), qos.OverrideMBRUL)
 	require.Equal(t, "high", qos.RequestedPriority)
@@ -556,8 +556,8 @@ func TestAdaptiveQoSStatusExposesCurrentAndDefaultProfiles(t *testing.T) {
 	require.NotNil(t, status.DefaultQoSProfile)
 	require.Equal(t, status.QoSDecision.SelectedProfileID, status.CurrentQoSProfile.SelectedProfileID)
 	require.Equal(t, "adaptive-default", status.DefaultQoSProfile.SelectedProfileID)
-	require.Equal(t, uint64(100000), status.DefaultQoSProfile.OverrideGFBRDL)
-	require.Equal(t, uint64(100000), status.DefaultQoSProfile.OverrideGFBRUL)
+	require.Equal(t, uint64(1000000), status.DefaultQoSProfile.OverrideGFBRDL)
+	require.Equal(t, uint64(1000000), status.DefaultQoSProfile.OverrideGFBRUL)
 }
 
 func TestAdaptiveQoSAutoEndsFlowAfterExpectedArrival(t *testing.T) {
@@ -610,7 +610,7 @@ func TestAdaptiveQoSAutoEndsFlowAfterExpectedArrival(t *testing.T) {
 			}
 		}
 		return true
-	}, 3*time.Second, 50*time.Millisecond)
+	}, 12*time.Second, 100*time.Millisecond)
 
 	snapshot := driver.Snapshot()
 	foundCleared := false

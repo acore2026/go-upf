@@ -17,6 +17,7 @@ type adaptiveStoryView struct {
 	BurstSize           uint64           `json:"burstSize,omitempty"`
 	BurstDurationMs     uint64           `json:"burstDurationMs,omitempty"`
 	DeadlineMs          uint64           `json:"deadlineMs,omitempty"`
+	ExpectedArrivalTime time.Time        `json:"expectedArrivalTime,omitempty"`
 	FlowDescription     string           `json:"flowDescription,omitempty"`
 	PacketCount         uint64           `json:"packetCount,omitempty"`
 }
@@ -55,6 +56,7 @@ func (d *Driver) currentStoryView() *adaptiveStoryView {
 		BurstSize:           latest.LatestReport.BurstSize,
 		BurstDurationMs:     storyDurationMs(latest.LatestReport.BurstDuration, latest.LatestReport.BurstDurationMs),
 		DeadlineMs:          storyDurationMs(latest.LatestReport.Deadline, latest.LatestReport.DeadlineMs),
+		ExpectedArrivalTime: latest.LatestReport.expectedArrivalTime(),
 		FlowDescription:     latest.FlowDescription,
 		PacketCount:         latest.PacketCount.Load(),
 	}
