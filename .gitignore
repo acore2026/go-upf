@@ -27,3 +27,11 @@ cscope.*
 # Debug
 *.log
 *.pcap
+
+# Node.js
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Other
+.codex
