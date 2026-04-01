@@ -1,515 +1,510 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
-  AlertCircle,
-  Database,
-  Gauge,
+  Cpu,
   Play,
   Radio,
-  RefreshCw,
   Router,
-  ShieldCheck,
   Smartphone,
+  Square,
 } from 'lucide-react';
 import {
   Background,
-  BackgroundVariant,
-  Controls,
+  BaseEdge,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
+  getBezierPath,
   type Edge,
   type EdgeProps,
   type Node,
   type NodeProps,
   type NodeTypes,
-  BaseEdge,
-  getBezierPath,
-  useEdgesState,
-  useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { api } from './api';
-import type { FlowDetail, SidecarStatus, StorySummary, TraceEntry, UPFStatus } from './api';
-import { cn, formatBitrate, formatBytes, formatCountdown, formatTime } from './utils';
+import { cn, formatBitrate, formatBytes } from './utils';
 
-type DeviceKind = 'ue' | 'sidecar' | 'ran' | 'upf' | 'policy' | 'app';
-type LinkKind = 'access' | 'tunnel' | 'qos' | 'telemetry';
-type GraphSelection =
-  | { type: 'node'; id: string }
-  | { type: 'edge'; id: string }
-  | null;
+type DemoStage =
+  | 'idle'
+  | 'triggered'
+  | 'ul_qos_prep'
+  | 'ul_sending'
+  | 'service_path_selected'
+  | 'processing'
+  | 'dl_qos_prep'
+  | 'dl_sending'
+  | 'complete'
+  | 'stopped';
 
-type DeviceNodeData = {
+type StageDirection = 'UL' | 'DL' | 'BIDIR' | 'NONE';
+type NodeKind = 'endpoint' | 'access' | 'upf' | 'router' | 'service';
+type NodeRole = 'IDLE' | 'ANCHOR' | 'SERVICE' | 'ANCHOR + SERVICE';
+type LinkKind = 'baseline' | 'burst' | 'optimized';
+
+type DemoNodeData = {
   label: string;
-  kind: DeviceKind;
-  active?: boolean;
-  emphasis?: boolean;
+  kind: NodeKind;
+  location?: string;
+  status: string;
+  sideTitle?: string;
+  sideValue?: string;
   meta?: string;
-  badges?: string[];
-};
-
-type GraphEdgeData = {
-  kind: LinkKind;
-  label: string;
+  role?: NodeRole;
+  accent?: 'blue' | 'cyan' | 'green' | 'amber' | 'pink';
   active?: boolean;
   emphasis?: boolean;
-  detail?: string;
+  badges?: string[];
+  ports?: Array<{ id: string; label: string; side: 'left' | 'right' }>;
 };
 
-type GraphBlueprint = {
-  nodes: Node<DeviceNodeData>[];
-  edges: Edge<GraphEdgeData>[];
+type DemoEdgeData = {
+  label: string;
+  kind: LinkKind;
+  state: 'idle' | 'active' | 'selected';
+  detail: string;
 };
 
-type TimelineEvent = TraceEntry & {
-  origin: 'upf' | 'sidecar';
+type RegionNodeData = {
+  label: string;
+  tone: 'shenzhen' | 'backbone' | 'shanghai';
 };
 
-const kindMeta: Record<DeviceKind, { icon: typeof Smartphone; tint: string }> = {
-  ue: { icon: Smartphone, tint: 'var(--graph-ue)' },
-  sidecar: { icon: ShieldCheck, tint: 'var(--graph-sidecar)' },
-  ran: { icon: Radio, tint: 'var(--graph-ran)' },
-  upf: { icon: Router, tint: 'var(--graph-upf)' },
-  policy: { icon: Gauge, tint: 'var(--graph-policy)' },
-  app: { icon: Database, tint: 'var(--graph-app)' },
+type DemoEvent = {
+  id: string;
+  stage: DemoStage;
+  title: string;
+  detail: string;
+  tone: 'neutral' | 'good' | 'accent';
 };
 
-const edgeMeta: Record<LinkKind, { color: string; dash?: string }> = {
-  access: { color: 'var(--graph-ran)' },
-  tunnel: { color: 'var(--graph-sidecar)' },
-  qos: { color: 'var(--graph-policy)' },
-  telemetry: { color: 'var(--graph-upf)', dash: '8 8' },
+type StageDefinition = {
+  stage: DemoStage;
+  durationMs: number;
+  status: string;
+  qosDirection: StageDirection;
+  qosProfile: string;
+  qosState: string;
+  burstState: string;
+  burstTargetBitrate: number;
+  burstSize: number;
+  pathSummary: string;
+  pathScore: string;
+  latency: string;
+  bandwidth: string;
+  resultStatus: string;
+  resultSummary: string;
+  event: DemoEvent;
 };
 
-const nodeTypes: NodeTypes = {
-  device: DeviceNode,
+const stageSequence: StageDefinition[] = [
+  {
+    stage: 'triggered',
+    durationMs: 1400,
+    status: 'Workflow initialized',
+    qosDirection: 'NONE',
+    qosProfile: 'Standby',
+    qosState: 'Monitoring burst signature',
+    burstState: 'Task accepted',
+    burstTargetBitrate: 0,
+    burstSize: 0,
+    pathSummary: 'Baseline route retained',
+    pathScore: '52 / 100',
+    latency: '31 ms',
+    bandwidth: '1.8 Gbps',
+    resultStatus: 'Awaiting uplink',
+    resultSummary: 'Vision request queued for remote inference',
+    event: {
+      id: 'mission-armed',
+      stage: 'triggered',
+      title: 'Task request received',
+      detail: 'Robot vision workload registered. Monitoring burst intent before temporary assurance is applied.',
+      tone: 'neutral',
+    },
+  },
+  {
+    stage: 'ul_qos_prep',
+    durationMs: 1800,
+    status: 'UL assurance prep',
+    qosDirection: 'UL',
+    qosProfile: 'Burst UL Gold',
+    qosState: 'Temporary UL assurance active',
+    burstState: 'Burst predicted',
+    burstTargetBitrate: 480_000_000,
+    burstSize: 13_200_000,
+    pathSummary: 'A-UP locked at Access City',
+    pathScore: '71 / 100',
+    latency: '24 ms',
+    bandwidth: '3.4 Gbps',
+    resultStatus: 'Uplink about to start',
+    resultSummary: 'RAN and access UPF reserve headroom for one-shot image burst',
+    event: {
+      id: 'ul-qos',
+      stage: 'ul_qos_prep',
+      title: 'Flexible QoS activated for uplink',
+      detail: 'Burst estimate is published before transmission. Temporary UL assurance is active at the gNB path.',
+      tone: 'accent',
+    },
+  },
+  {
+    stage: 'ul_sending',
+    durationMs: 1900,
+    status: 'UL burst in flight',
+    qosDirection: 'UL',
+    qosProfile: 'Burst UL Gold',
+    qosState: 'UL burst being delivered',
+    burstState: 'Uplink sending',
+    burstTargetBitrate: 480_000_000,
+    burstSize: 13_200_000,
+    pathSummary: 'A-UP handles initial anchor',
+    pathScore: '76 / 100',
+    latency: '22 ms',
+    bandwidth: '3.8 Gbps',
+    resultStatus: 'Frames entering core',
+    resultSummary: 'Image burst leaves the device and crosses the access path under temporary UL treatment',
+    event: {
+      id: 'ul-send',
+      stage: 'ul_sending',
+      title: 'Burst enters user plane',
+      detail: 'The current path is still anchored close to the UE while the system evaluates a better service route.',
+      tone: 'good',
+    },
+  },
+  {
+    stage: 'service_path_selected',
+    durationMs: 2100,
+    status: 'Service path optimized',
+    qosDirection: 'UL',
+    qosProfile: 'Burst UL Gold',
+    qosState: 'UL assurance maintained',
+    burstState: 'Service route selected',
+    burstTargetBitrate: 480_000_000,
+    burstSize: 13_200_000,
+    pathSummary: 'A-UP Access City -> S-UP Service City',
+    pathScore: '93 / 100',
+    latency: '14 ms',
+    bandwidth: '5.6 Gbps',
+    resultStatus: 'Optimized route active',
+    resultSummary: 'A-UP remains near the UE while traffic is redirected through an S-UP close to the AI service',
+    event: {
+      id: 'service-select',
+      stage: 'service_path_selected',
+      title: 'A-UP / S-UP roles assigned',
+      detail: 'The network keeps the anchor UPF near the user and inserts a service UPF close to the remote inference endpoint.',
+      tone: 'accent',
+    },
+  },
+  {
+    stage: 'processing',
+    durationMs: 2200,
+    status: 'Remote inference running',
+    qosDirection: 'BIDIR',
+    qosProfile: 'Burst UL Gold',
+    qosState: 'UL assurance winding down',
+    burstState: 'Server processing',
+    burstTargetBitrate: 240_000_000,
+    burstSize: 13_200_000,
+    pathSummary: 'Optimized service chain stable',
+    pathScore: '95 / 100',
+    latency: '12 ms',
+    bandwidth: '5.9 Gbps',
+    resultStatus: 'Object set resolved',
+    resultSummary: 'Remote inference server is producing mission labels from the uploaded scene',
+    event: {
+      id: 'processing',
+      stage: 'processing',
+      title: 'Inference workload executing',
+      detail: 'The service-side UPF remains active while the central AI server processes the burst and prepares a compact response.',
+      tone: 'good',
+    },
+  },
+  {
+    stage: 'dl_qos_prep',
+    durationMs: 1700,
+    status: 'DL assurance prep',
+    qosDirection: 'DL',
+    qosProfile: 'Result DL Priority',
+    qosState: 'Temporary DL assurance active',
+    burstState: 'Return path prepared',
+    burstTargetBitrate: 120_000_000,
+    burstSize: 1_600_000,
+    pathSummary: 'Optimized service path preserved',
+    pathScore: '92 / 100',
+    latency: '13 ms',
+    bandwidth: '4.7 Gbps',
+    resultStatus: 'Result package staged',
+    resultSummary: 'The return payload is smaller but latency-sensitive, so the downlink burst is prepared separately',
+    event: {
+      id: 'dl-qos',
+      stage: 'dl_qos_prep',
+      title: 'Flexible QoS activated for downlink',
+      detail: 'Downlink assurance is armed independently from the uplink burst to protect the result delivery window.',
+      tone: 'accent',
+    },
+  },
+  {
+    stage: 'dl_sending',
+    durationMs: 1800,
+    status: 'DL burst in flight',
+    qosDirection: 'DL',
+    qosProfile: 'Result DL Priority',
+    qosState: 'DL burst being delivered',
+    burstState: 'Downlink sending',
+    burstTargetBitrate: 120_000_000,
+    burstSize: 1_600_000,
+    pathSummary: 'S-UP returning via A-UP anchor',
+    pathScore: '89 / 100',
+    latency: '15 ms',
+    bandwidth: '4.2 Gbps',
+    resultStatus: 'Result crossing access network',
+    resultSummary: 'Inference summary returns through the selected service path and lands back on the local anchor',
+    event: {
+      id: 'dl-send',
+      stage: 'dl_sending',
+      title: 'Result burst delivered',
+      detail: 'The return path stays optimized while the local anchor protects continuity back to the device.',
+      tone: 'good',
+    },
+  },
+  {
+    stage: 'complete',
+    durationMs: 0,
+    status: 'Workflow complete',
+    qosDirection: 'NONE',
+    qosProfile: 'Released',
+    qosState: 'Temporary assurance released',
+    burstState: 'Delivery complete',
+    burstTargetBitrate: 0,
+    burstSize: 0,
+    pathSummary: 'Route released to baseline',
+    pathScore: 'Baseline restored',
+    latency: '28 ms',
+    bandwidth: '1.8 Gbps',
+    resultStatus: 'Preview ready',
+    resultSummary: 'Detected assets: robot dog, pallet, warning cone, worker',
+    event: {
+      id: 'complete',
+      stage: 'complete',
+      title: 'Temporary assurance released',
+      detail: 'UL and DL burst treatment ends after delivery. The path falls back to baseline while the result stays on screen.',
+      tone: 'good',
+    },
+  },
+];
+
+const stageIndexById = new Map(stageSequence.map((item, index) => [item.stage, index]));
+const nodeTypes: NodeTypes = { mission: MissionNode, region: RegionNode };
+
+const kindMeta: Record<NodeKind, { icon: typeof Smartphone; tint: string }> = {
+  endpoint: { icon: Smartphone, tint: 'var(--node-blue)' },
+  access: { icon: Radio, tint: 'var(--node-green)' },
+  upf: { icon: Router, tint: 'var(--node-cyan)' },
+  router: { icon: Activity, tint: 'var(--node-amber)' },
+  service: { icon: Cpu, tint: 'var(--node-pink)' },
 };
 
 export default function App() {
   return (
     <ReactFlowProvider>
-      <Dashboard />
+      <MissionControl />
     </ReactFlowProvider>
   );
 }
 
-function Dashboard() {
-  const [sidecarStatus, setSidecarStatus] = useState<SidecarStatus | null>(null);
-  const [upfStatus, setUpfStatus] = useState<UPFStatus | null>(null);
-  const [sidecarTrace, setSidecarTrace] = useState<TraceEntry[]>([]);
-  const [upfTrace, setUpfTrace] = useState<TraceEntry[]>([]);
-  const [flow, setFlow] = useState<FlowDetail | null>(null);
-  const [flowId, setFlowId] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isResetting, setIsResetting] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
-  const [isInjecting, setIsInjecting] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [showAuxiliary, setShowAuxiliary] = useState(true);
-  const [showTelemetry, setShowTelemetry] = useState(true);
-  const [selection, setSelection] = useState<GraphSelection>(null);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<DeviceNodeData>>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<GraphEdgeData>>([]);
-
-  const refreshAll = async () => {
-    try {
-      const [sStatus, sTrace, uStatus, uTrace] = await Promise.all([
-        api.getSidecarStatus(),
-        api.getSidecarTrace(),
-        api.getUPFStatus(),
-        api.getUPFTrace(),
-      ]);
-
-      setSidecarStatus(sStatus);
-      setSidecarTrace(sTrace || []);
-      setUpfStatus(uStatus);
-      setUpfTrace(uTrace || []);
-      setLastUpdate(new Date());
-
-      if (flowId) {
-        setFlow(await api.getFlowDetail(flowId));
-      } else {
-        setFlow(null);
-      }
-      setError(null);
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
+function MissionControl() {
+  const [missionState, setMissionState] = useState<'idle' | 'running' | 'complete' | 'stopped'>('idle');
+  const [stage, setStage] = useState<DemoStage>('idle');
 
   useEffect(() => {
-    refreshAll();
-    const interval = window.setInterval(refreshAll, 1000);
-    return () => window.clearInterval(interval);
-  }, [flowId]);
+    if (missionState !== 'running') return;
 
-  const handleStartStory = async () => {
-    setIsStarting(true);
-    setError(null);
-    try {
-      const randomId =
-        typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID().slice(0, 8)
-          : Math.random().toString(36).substring(2, 10);
-      const generatedFlowId = `flow-${randomId}`;
-      const resp = await api.startStory1({
-        flowId: generatedFlowId,
-        ueAddress: '10.60.0.1',
-        packet: {
-          srcIp: '10.60.0.1',
-          dstIp: '198.51.100.10',
-          srcPort: 40000,
-          dstPort: 9999,
-          protocol: 'udp',
+    const currentIndex = stageIndexById.get(stage);
+    const nextIndex = stage === 'idle' ? 0 : currentIndex === undefined ? 0 : currentIndex + 1;
+
+    if (nextIndex >= stageSequence.length) {
+      setMissionState('complete');
+      setStage('complete');
+      return;
+    }
+
+    const delay = stage === 'idle' ? 80 : stageSequence[currentIndex ?? 0].durationMs;
+    const timeout = window.setTimeout(() => {
+      const nextStage = stageSequence[nextIndex].stage;
+      setStage(nextStage);
+      if (nextStage === 'complete') setMissionState('complete');
+    }, delay);
+
+    return () => window.clearTimeout(timeout);
+  }, [missionState, stage]);
+
+  const activeStage = useMemo<StageDefinition | null>(() => {
+    if (stage === 'idle' || stage === 'stopped') return null;
+    return stageSequence[stageIndexById.get(stage) ?? 0] ?? null;
+  }, [stage]);
+
+  const visibleEvents = useMemo(() => {
+    if (stage === 'idle') return [];
+    if (stage === 'stopped') {
+      return [
+        {
+          id: 'stopped',
+          stage: 'stopped' as DemoStage,
+          title: 'Demo stopped',
+          detail: 'Playback was stopped by the operator. The dashboard returns to standby while keeping the topology visible.',
+          tone: 'neutral' as const,
         },
-      });
-
-      const responseFlowId = resp?.flowId || resp?.FlowID || generatedFlowId;
-      if (isRejectedStoryStart(resp)) {
-        setFlowId('');
-        setFlow(null);
-        throw new Error(resp?.reasonCode || resp?.status || 'story start rejected');
-      }
-
-      setFlowId(responseFlowId);
-      setSelection({ type: 'node', id: 'ue-main' });
-      await refreshAll();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsStarting(false);
+      ];
     }
+
+    const lastStageIndex = stageIndexById.get(stage) ?? stageSequence.length - 1;
+    return stageSequence.slice(0, lastStageIndex + 1).map((item) => item.event).reverse();
+  }, [stage]);
+
+  const statusLabel =
+    missionState === 'idle'
+      ? 'Standby'
+      : missionState === 'stopped'
+        ? 'Stopped'
+        : activeStage?.status || 'Workflow complete';
+
+  const snapshot = buildSnapshot(stage, activeStage);
+  const graph = useMemo(() => buildGraph(snapshot), [snapshot]);
+
+  const handleTrigger = () => {
+    setMissionState('running');
+    setStage('idle');
   };
 
-  const handleReset = async () => {
-    setIsResetting(true);
-    setError(null);
-    try {
-      await api.reset();
-      setFlowId('');
-      setFlow(null);
-      setSelection(null);
-      await refreshAll();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsResetting(false);
-    }
+  const handleStop = () => {
+    setMissionState('stopped');
+    setStage('stopped');
   };
-
-  const handleInjectBurst = async () => {
-    if (!flowId) return;
-    setIsInjecting(true);
-    setError(null);
-    try {
-      await api.injectBurst('10.60.0.1', flowId);
-      setSelection({ type: 'edge', id: 'ran-upf' });
-      await refreshAll();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsInjecting(false);
-    }
-  };
-
-  const mergedTimeline = useMemo<TimelineEvent[]>(() => {
-    return [...sidecarTrace.map((entry) => ({ ...entry, origin: 'sidecar' as const })), ...upfTrace.map((entry) => ({ ...entry, origin: 'upf' as const }))]
-      .sort((a, b) => {
-        const timeA = new Date(a.timestamp).getTime();
-        const timeB = new Date(b.timestamp).getTime();
-        if (timeA !== timeB) return timeA - timeB;
-        return (a.seq || 0) - (b.seq || 0);
-      })
-      .slice(-80);
-  }, [sidecarTrace, upfTrace]);
-
-  const story = useMemo<StorySummary | undefined>(
-    () => upfStatus?.story || sidecarStatus?.story,
-    [sidecarStatus, upfStatus],
-  );
-
-  const storyExpiry = useMemo(() => {
-    const expectedArrivalTime =
-      sidecarStatus?.story?.expectedArrivalTime ||
-      upfStatus?.story?.expectedArrivalTime ||
-      flow?.lastReport?.expectedArrivalTime;
-
-    if (!expectedArrivalTime) return null;
-
-    const arrivalMs = new Date(expectedArrivalTime).getTime();
-    if (Number.isNaN(arrivalMs)) return null;
-
-    const expiryMs = arrivalMs + 10_000;
-    return {
-      expiryMs,
-      remainingMs: expiryMs - Date.now(),
-    };
-  }, [flow, lastUpdate, sidecarStatus, upfStatus]);
-
-  const flowActive =
-    !!flow?.active || (sidecarStatus?.activeFlows || 0) > 0 || (upfStatus?.activeFlows || 0) > 0;
-  const storyLive = !!storyExpiry && storyExpiry.remainingMs > 0 && flowActive;
-  const activeProfileId =
-    upfStatus?.currentQoSProfile?.selectedProfileId ||
-    story?.profileId ||
-    flow?.lastFeedback?.profileId ||
-    '';
-
-  const blueprint = useMemo(
-    () =>
-      buildGraphBlueprint({
-        story,
-        sidecarStatus,
-        upfStatus,
-        flow,
-        flowActive,
-        storyLive,
-        activeProfileId,
-        showAuxiliary,
-        showTelemetry,
-      }),
-    [activeProfileId, flow, flowActive, showAuxiliary, showTelemetry, sidecarStatus, story, storyLive, upfStatus],
-  );
-
-  useEffect(() => {
-    setNodes((prev) =>
-      blueprint.nodes.map((node) => {
-        const existing = prev.find((candidate) => candidate.id === node.id);
-        return existing
-          ? {
-              ...node,
-              position: existing.position,
-              selected: selection?.type === 'node' && selection.id === node.id,
-            }
-          : {
-              ...node,
-              selected: selection?.type === 'node' && selection.id === node.id,
-            };
-      }),
-    );
-    setEdges(
-      blueprint.edges.map((edge) => ({
-        ...edge,
-        selected: selection?.type === 'edge' && selection.id === edge.id,
-      })),
-    );
-  }, [blueprint, selection, setEdges, setNodes]);
-
-  const selectedNode = selection?.type === 'node' ? nodes.find((node) => node.id === selection.id) : null;
-  const selectedEdge = selection?.type === 'edge' ? edges.find((edge) => edge.id === selection.id) : null;
-
-  const summaryItems = [
-    { label: 'Current flow', value: flowId || 'Idle' },
-    { label: 'Profile', value: activeProfileId || 'default' },
-    { label: 'Packets', value: String(upfStatus?.story?.packetCount || 0) },
-    { label: 'Timer', value: storyExpiry ? formatCountdown(storyExpiry.remainingMs) : 'Standby' },
-  ];
 
   return (
-    <div className="dashboard-shell">
-      <div className="dashboard-backdrop" />
+    <div className="mission-shell">
+      <div className="mission-grid" />
 
-      <header className="dashboard-header">
-        <div>
-          <p className="eyebrow">Adaptive QoS</p>
-          <h1>Path dashboard</h1>
-          <p className="header-copy">
-            Interactive topology for UE, sidecar, RAN, UPF, and supporting links. Drag nodes, select a path, and inspect live state.
-          </p>
+      <header className="mission-header">
+        <div className="mission-header-compact">
+          <p className="mission-kicker">Adaptive QoS Topology</p>
         </div>
 
-        <div className="header-actions">
-          <button onClick={handleReset} disabled={isResetting} className="button button-muted">
-            <RefreshCw size={16} className={cn(isResetting && 'spin-fast')} />
-            Reset
-          </button>
-          <button onClick={handleInjectBurst} disabled={isInjecting || !flowId || !flowActive} className="button button-secondary">
-            <Activity size={16} className={cn(isInjecting && 'spin-fast')} />
-            Inject burst
-          </button>
-          <button onClick={handleStartStory} disabled={isStarting} className="button button-primary">
-            {isStarting ? <RefreshCw size={16} className="spin-fast" /> : <Play size={16} />}
-            Start flow
-          </button>
+        <div className="mission-toolbar">
+          <div className="status-cluster">
+            <StatusBadge label={statusLabel} tone={missionState === 'running' ? 'live' : missionState === 'complete' ? 'good' : 'idle'} />
+            <StatusBadge label={snapshot.direction === 'NONE' ? 'No burst' : `${snapshot.direction} traffic`} tone="accent" />
+            <StatusBadge label={snapshot.serviceUpf === 'Pending' || snapshot.serviceUpf === 'Not selected' ? 'Single path' : 'Dual-UPF active'} tone="idle" />
+          </div>
+
+          <div className="toolbar-actions">
+            <button className="control-button control-button-primary" onClick={handleTrigger}>
+              <Play size={16} />
+              Start demo
+            </button>
+            <button className="control-button" onClick={handleStop}>
+              <Square size={16} />
+              Reset
+            </button>
+          </div>
         </div>
       </header>
 
-      {error && (
-        <div className="alert-banner">
-          <AlertCircle size={16} />
-          <span>{error}</span>
-        </div>
-      )}
-
-      <section className="summary-strip">
-        {summaryItems.map((item) => (
-          <div key={item.label} className="summary-card">
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-          </div>
-        ))}
-        <div className="summary-card summary-card-status">
-          <span>Services</span>
-          <div className="status-pills">
-            <StatusPill label="UPF" active={!!upfStatus?.running} />
-            <StatusPill label="Sidecar" active={!!sidecarStatus} />
-            <StatusPill label="Flow" active={flowActive} />
-          </div>
-        </div>
-      </section>
-
-      <section className="workspace-grid">
-        <div className="panel panel-graph">
-          <div className="panel-header">
+      <main className="mission-main">
+        <section className="canvas-panel">
+          <div className="canvas-header">
             <div>
-              <p className="eyebrow">Topology</p>
-              <h2>Flexible path map</h2>
-            </div>
-            <div className="toggle-row">
-              <ToggleChip
-                label="Aux devices"
-                active={showAuxiliary}
-                onClick={() => setShowAuxiliary((value) => !value)}
-              />
-              <ToggleChip
-                label="Telemetry links"
-                active={showTelemetry}
-                onClick={() => setShowTelemetry((value) => !value)}
-              />
+              <p className="panel-kicker">Active Topology</p>
+              <h2>Service-path routing workspace</h2>
             </div>
           </div>
 
-          <div className="graph-shell">
-            <ReactFlow
-              fitView
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodeClick={(_, node) => setSelection({ type: 'node', id: node.id })}
-              onEdgeClick={(_, edge) => setSelection({ type: 'edge', id: edge.id })}
-              onPaneClick={() => setSelection(null)}
+        <div className="canvas-shell">
+          <ReactFlow
+              nodes={graph.nodes}
+              edges={graph.edges}
               nodeTypes={nodeTypes}
-              edgeTypes={{ path: PathEdge }}
-              fitViewOptions={{ padding: 0.18 }}
-              minZoom={0.45}
-              maxZoom={1.5}
-              defaultEdgeOptions={{ type: 'path' }}
-              nodesDraggable
+              edgeTypes={{ mission: MissionEdge }}
+              fitView
+              fitViewOptions={{ padding: 0.12 }}
+              nodesConnectable={false}
+              nodesDraggable={false}
+              nodesFocusable={false}
+              elementsSelectable={false}
+              panOnDrag
+              zoomOnDoubleClick={false}
+              zoomOnScroll
               proOptions={{ hideAttribution: true }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(39, 57, 92, 0.08)" />
-              <MiniMap
-                pannable
-                zoomable
-                nodeStrokeColor={(node) => (node.selected ? 'var(--accent-strong)' : 'rgba(34, 47, 76, 0.25)')}
-                nodeColor={(node) => String(node.data?.active ? node.data?.emphasis ? '#f97316' : '#1d4ed8' : '#d9dfec')}
-                maskColor="rgba(244, 247, 252, 0.72)"
-              />
-              <Controls showInteractive={false} position="bottom-right" />
+              <Background gap={36} size={1} color="rgba(95, 126, 161, 0.16)" />
             </ReactFlow>
           </div>
-        </div>
+        </section>
 
-        <div className="panel panel-side">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Inspector</p>
-              <h2>{selectedNode ? selectedNode.data.label : selectedEdge ? selectedEdge.data?.label : 'Selection'}</h2>
-            </div>
-            <span className="subtle-meta">{formatTime(lastUpdate.toISOString())}</span>
+        <aside className="focus-panel">
+          <div className="overlay-panel">
+            <PanelTitle eyebrow="QoS Control" title={snapshot.qosState} />
+            <StatRow label="Direction" value={snapshot.direction} />
+            <StatRow label="Profile" value={snapshot.qosProfile} />
+            <StatRow label="Burst state" value={snapshot.burstState} />
+            <StatRow label="Target bitrate" value={formatBitrate(snapshot.targetBitrate)} />
           </div>
 
-          <div className="inspector-section">
-            {selectedNode && <NodeInspector node={selectedNode} story={story} flow={flow} upfStatus={upfStatus} />}
-            {selectedEdge && <EdgeInspector edge={selectedEdge} />}
-            {!selectedNode && !selectedEdge && (
-              <div className="empty-state">
-                <p>Select a device or link in the graph.</p>
-                <span>The map already supports multiple device and link categories. Toggle extra elements as needed.</span>
-              </div>
-            )}
+          <div className="overlay-panel">
+            <PanelTitle eyebrow="Routing Decision" title={snapshot.activePathLabel} />
+            <StatRow label="Anchor UPF" value={snapshot.anchorUpf} />
+            <StatRow label="Service UPF" value={snapshot.serviceUpf} />
+            <StatRow label="Path score" value={snapshot.pathScore} />
+            <StatRow label="Latency / BW" value={`${snapshot.latency} / ${snapshot.bandwidth}`} />
           </div>
 
-          <div className="inspector-section">
-            <p className="eyebrow">Live metrics</p>
-            <div className="metric-list">
-              <Metric label="Scenario" value={story?.scenario || 'None'} />
-              <Metric label="Flow tuple" value={story?.flowDescription || 'N/A'} />
-              <Metric label="Predicted air delay" value={story?.predictedAirDelayMs ? `${story.predictedAirDelayMs} ms` : 'N/A'} />
-              <Metric label="Selected profile" value={activeProfileId || 'default'} />
-              <Metric label="GFBR DL" value={formatBitrate(upfStatus?.currentQoSProfile?.overrideGfbrDl || upfStatus?.defaultQoSProfile?.overrideGfbrDl)} />
-              <Metric label="Payload" value={formatBytes(flow?.lastReport?.BurstSize || story?.burstSize)} />
-            </div>
+          <div className="overlay-panel">
+            <PanelTitle eyebrow="Traffic Snapshot" title={snapshot.taskTitle} />
+            <StatRow label="Payload" value={formatBytes(snapshot.burstSize)} />
+            <StatRow label="Stage" value={statusLabel} />
+            <StatRow label="Return window" value={snapshot.returnWindow} />
           </div>
-        </div>
-      </section>
 
-      <section className="workspace-grid workspace-grid-secondary">
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Links</p>
-              <h2>Path legend</h2>
+          <div className="overlay-panel">
+            <PanelTitle eyebrow="Inference Output" title={snapshot.resultStatus} />
+            <div className="result-preview">
+              <p>{snapshot.resultSummary}</p>
             </div>
           </div>
+        </aside>
+      </main>
 
-          <div className="legend-grid">
-            {(['access', 'tunnel', 'qos', 'telemetry'] as LinkKind[]).map((kind) => (
-              <div key={kind} className="legend-card">
-                <span className={`legend-line legend-${kind}`} />
-                <div>
-                  <strong>{titleize(kind)}</strong>
-                  <p>{linkDescription(kind)}</p>
-                </div>
-              </div>
-            ))}
+      <section className="bottom-panel">
+        <div className="bottom-card">
+          <PanelTitle eyebrow="Stage Timeline" title="Workflow trace" />
+          <div className="timeline-strip">
+            <TimelineStep label="Start" active={stage !== 'idle' && stage !== 'stopped'} complete={stage !== 'idle' && stage !== 'stopped'} />
+            <TimelineStep label="UL QoS" active={stage === 'ul_qos_prep'} complete={hasReached(stage, 'ul_qos_prep')} />
+            <TimelineStep label="UL Send" active={stage === 'ul_sending'} complete={hasReached(stage, 'ul_sending')} />
+            <TimelineStep label="Path Select" active={stage === 'service_path_selected'} complete={hasReached(stage, 'service_path_selected')} />
+            <TimelineStep label="Processing" active={stage === 'processing'} complete={hasReached(stage, 'processing')} />
+            <TimelineStep label="DL QoS" active={stage === 'dl_qos_prep'} complete={hasReached(stage, 'dl_qos_prep')} />
+            <TimelineStep label="DL Send" active={stage === 'dl_sending'} complete={hasReached(stage, 'dl_sending')} />
+            <TimelineStep label="Complete" active={stage === 'complete'} complete={stage === 'complete'} />
           </div>
         </div>
 
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Events</p>
-              <h2>Recent telemetry</h2>
-            </div>
-            <span className="subtle-meta">{mergedTimeline.length} events</span>
-          </div>
-
-          <div className="timeline">
-            {mergedTimeline.length === 0 && (
-              <div className="empty-state">
-                <p>No events yet.</p>
-                <span>Start a flow to populate the log.</span>
-              </div>
-            )}
-
-            {mergedTimeline
-              .slice()
-              .reverse()
-              .map((event, index) => (
-                <button
-                  key={`${event.timestamp}-${event.seq}-${index}`}
-                  className="timeline-row"
-                  onClick={() => setSelection({ type: 'node', id: event.origin === 'upf' ? 'upf-main' : 'sidecar-main' })}
-                >
-                  <span className={cn('timeline-dot', event.origin === 'upf' ? 'timeline-dot-upf' : 'timeline-dot-sidecar')} />
-                  <div className="timeline-copy">
-                    <div className="timeline-title">
-                      <strong>{formatTraceStage(event.stage)}</strong>
-                      <span>{formatTime(event.timestamp)}</span>
-                    </div>
-                    <p>
-                      {event.component.toUpperCase()} · {event.detail || event.status || event.reason || 'Event received'}
-                    </p>
+        <div className="bottom-card">
+          <PanelTitle eyebrow="Activity Feed" title={`${visibleEvents.length} activity events`} />
+          <div className="event-feed">
+            {visibleEvents.length === 0 ? (
+              <div className="event-empty">Start the demo to populate the staged activity feed.</div>
+            ) : (
+              visibleEvents.map((event) => (
+                <div key={event.id} className={cn('event-row', `event-row-${event.tone}`)}>
+                  <div className="event-dot" />
+                  <div>
+                    <strong>{event.title}</strong>
+                    <p>{event.detail}</p>
                   </div>
-                </button>
-              ))}
+                </div>
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -517,46 +512,92 @@ function Dashboard() {
   );
 }
 
-function DeviceNode({ data, selected }: NodeProps<Node<DeviceNodeData>>) {
+function MissionNode({ data }: NodeProps<Node<DemoNodeData>>) {
   const meta = kindMeta[data.kind];
   const Icon = meta.icon;
+  const isRouter = data.kind === 'router';
+  const isUpf = data.kind === 'upf';
+  const infoPrimary = data.sideTitle ?? data.status;
+  const infoSecondary = data.sideValue ?? (data.role && data.role !== 'IDLE' ? data.role : (data.badges || [])[0]);
+  const upfAnchorActive = data.role === 'ANCHOR' || data.role === 'ANCHOR + SERVICE';
+  const upfServiceActive = data.role === 'SERVICE' || data.role === 'ANCHOR + SERVICE';
 
   return (
     <div
       className={cn(
-        'device-node',
-        data.active && 'device-node-active',
-        data.emphasis && 'device-node-emphasis',
-        selected && 'device-node-selected',
+        'mission-node-shell',
+        isRouter && 'mission-node-shell-router',
       )}
-      style={{ '--device-tint': meta.tint } as React.CSSProperties}
+      style={{ '--node-tint': meta.tint } as React.CSSProperties}
     >
-      <Handle type="target" position={Position.Left} className="device-handle" />
-      <Handle type="source" position={Position.Right} className="device-handle" />
+      {isUpf ? (
+        <>
+          {data.ports?.map((port, index) => {
+            const offset = port.side === 'left' ? { top: `${32 + index * 26}%`, left: -8 } : { top: `${32 + index * 26}%`, right: -8 };
+            return (
+              <Handle
+                key={port.id}
+                id={port.id}
+                type={port.side === 'left' ? 'target' : 'source'}
+                position={port.side === 'left' ? Position.Left : Position.Right}
+                className="mission-handle mission-handle-upf"
+                style={offset}
+              />
+            );
+          })}
+        </>
+      ) : (
+        <>
+          <Handle type="target" position={Position.Left} className="mission-handle" />
+          <Handle type="source" position={Position.Right} className="mission-handle" />
+        </>
+      )}
 
-      <div className="device-node-icon">
-        <Icon size={18} />
+      <div
+        className={cn(
+          'mission-node',
+          isRouter && 'mission-node-router',
+          isUpf && 'mission-node-upf',
+          data.active && 'mission-node-active',
+          data.emphasis && 'mission-node-emphasis',
+        )}
+      >
+        <div className="mission-node-head">
+          <div className="mission-node-icon">
+            <Icon size={18} />
+          </div>
+          <div className="mission-node-copy">
+            <strong>{data.label}</strong>
+          </div>
+        </div>
+
+        {isUpf && (
+          <div className="mission-node-duo">
+            <div className={cn('mission-node-duo-card', upfAnchorActive && 'mission-node-duo-card-active')}>
+              <span>A-UPF</span>
+            </div>
+            <div className={cn('mission-node-duo-card', upfServiceActive && 'mission-node-duo-card-active service')}>
+              <span>S-UPF</span>
+            </div>
+          </div>
+        )}
+
       </div>
-      <div className="device-node-copy">
-        <strong>{data.label}</strong>
-        {data.meta && <span>{data.meta}</span>}
-      </div>
-      {!!data.badges?.length && (
-        <div className="device-node-badges">
-          {data.badges.slice(0, 2).map((badge) => (
-            <span key={badge}>{badge}</span>
-          ))}
+
+      {!isRouter && (
+        <div className="mission-node-aside">
+          <span className="mission-node-aside-primary">{infoPrimary}</span>
+          {infoSecondary ? <strong className="mission-node-aside-secondary">{infoSecondary}</strong> : null}
         </div>
       )}
     </div>
   );
 }
 
-function PathEdge(props: EdgeProps<Edge<GraphEdgeData>>) {
-  const [path, labelX, labelY] = getBezierPath(props);
-  const meta = edgeMeta[props.data?.kind || 'access'];
-  const active = !!props.data?.active;
-  const selected = !!props.selected;
+function MissionEdge(props: EdgeProps<Edge<DemoEdgeData>>) {
+  const [path] = getBezierPath(props);
+  const state = props.data?.state || 'idle';
+  const kind = props.data?.kind || 'baseline';
 
   return (
     <>
@@ -564,255 +605,318 @@ function PathEdge(props: EdgeProps<Edge<GraphEdgeData>>) {
         path={path}
         markerEnd={props.markerEnd}
         style={{
-          stroke: meta.color,
-          strokeWidth: selected ? 4 : active ? 3 : 2,
-          strokeOpacity: active ? 0.95 : 0.42,
-          strokeDasharray: meta.dash,
+          stroke: edgeColor(kind, state),
+          strokeWidth: state === 'selected' ? 5 : state === 'active' ? 3.6 : 2.4,
+          strokeOpacity: state === 'idle' ? 0.55 : 0.98,
+          strokeDasharray: kind === 'baseline' ? '10 8' : kind === 'burst' ? '18 8' : undefined,
         }}
       />
-      <foreignObject x={labelX - 72} y={labelY - 16} width={144} height={32}>
-        <div className={cn('edge-label', active && 'edge-label-active', selected && 'edge-label-selected')}>
-          {props.data?.label}
-        </div>
-      </foreignObject>
     </>
   );
 }
 
-function StatusPill({ label, active }: { label: string; active: boolean }) {
+function RegionNode({ data }: NodeProps<Node<RegionNodeData>>) {
   return (
-    <span className={cn('status-pill', active && 'status-pill-active')}>
-      <span className="status-pill-dot" />
-      {label}
-    </span>
+    <div className={cn('region-node', `region-node-${data.tone}`)}>
+      <span>{data.label}</span>
+    </div>
   );
 }
 
-function ToggleChip({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
+function PanelTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
-    <button className={cn('toggle-chip', active && 'toggle-chip-active')} onClick={onClick}>
-      {label}
-    </button>
+    <div className="panel-title">
+      <p>{eyebrow}</p>
+      <h3>{title}</h3>
+    </div>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function StatusBadge({ label, tone }: { label: string; tone: 'idle' | 'live' | 'good' | 'accent' }) {
+  return <span className={cn('status-badge', `status-badge-${tone}`)}>{label}</span>;
+}
+
+function StatRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="metric-row">
+    <div className="stat-row">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
 }
 
-function NodeInspector({
-  node,
-  story,
-  flow,
-  upfStatus,
+function TimelineStep({
+  active,
+  complete,
+  label,
 }: {
-  node: Node<DeviceNodeData>;
-  story?: StorySummary;
-  flow: FlowDetail | null;
-  upfStatus: UPFStatus | null;
+  active: boolean;
+  complete: boolean;
+  label: string;
 }) {
-  const items = nodeInspectorRows(node, story, flow, upfStatus);
-
   return (
-    <>
-      <p className="inspector-copy">
-        {node.data.kind === 'ue' && 'Traffic source and session owner.'}
-        {node.data.kind === 'sidecar' && 'Local signaling and MASQUE coordination point.'}
-        {node.data.kind === 'ran' && 'Radio path decision point.'}
-        {node.data.kind === 'upf' && 'User-plane forwarding and adaptive QoS enforcement point.'}
-        {node.data.kind === 'policy' && 'Profile and bandwidth shaping context.'}
-        {node.data.kind === 'app' && 'Destination application endpoint.'}
-      </p>
-      <div className="metric-list">
-        {items.map((item) => (
-          <Metric key={item.label} label={item.label} value={item.value} />
-        ))}
-      </div>
-    </>
+    <div className={cn('timeline-step', active && 'timeline-step-active', complete && 'timeline-step-complete')}>
+      <span className="timeline-step-dot" />
+      <strong>{label}</strong>
+    </div>
   );
 }
 
-function EdgeInspector({ edge }: { edge: Edge<GraphEdgeData> }) {
-  return (
-    <>
-      <p className="inspector-copy">{edge.data?.detail || 'Transport path between two devices.'}</p>
-      <div className="metric-list">
-        <Metric label="Type" value={titleize(edge.data?.kind || 'access')} />
-        <Metric label="State" value={edge.data?.active ? 'Active' : 'Idle'} />
-        <Metric label="Route" value={`${edge.source} -> ${edge.target}`} />
-        <Metric label="Label" value={edge.data?.label || 'Unnamed'} />
-      </div>
-    </>
-  );
+function buildSnapshot(stage: DemoStage, activeStage: StageDefinition | null) {
+  const idleSnapshot = {
+    direction: 'NONE' as StageDirection,
+    qosProfile: 'Standby',
+    qosState: 'No temporary assurance',
+    burstState: 'Waiting for trigger',
+    targetBitrate: 0,
+    burstSize: 0,
+    pathScore: '52 / 100',
+    latency: '31 ms',
+    bandwidth: '1.8 Gbps',
+    anchorUpf: 'UPF Access City',
+    serviceUpf: 'Not selected',
+    activePathLabel: 'Baseline path',
+    taskTitle: 'Remote vision workflow',
+    resultStatus: 'Standby',
+    resultSummary: 'No preview yet. Trigger the mission to start the demo.',
+    returnWindow: 'Not armed',
+    stage,
+  };
+
+  if (stage === 'stopped') {
+    return {
+      ...idleSnapshot,
+      qosState: 'Playback halted',
+      burstState: 'Stopped by operator',
+      resultStatus: 'Playback stopped',
+    };
+  }
+
+  if (!activeStage) return idleSnapshot;
+
+  return {
+    direction: activeStage.qosDirection,
+    qosProfile: activeStage.qosProfile,
+    qosState: activeStage.qosState,
+    burstState: activeStage.burstState,
+    targetBitrate: activeStage.burstTargetBitrate,
+    burstSize: activeStage.burstSize,
+    pathScore: activeStage.pathScore,
+    latency: activeStage.latency,
+    bandwidth: activeStage.bandwidth,
+    anchorUpf: 'UPF - Shenzhen',
+    serviceUpf:
+      activeStage.stage === 'service_path_selected' ||
+      activeStage.stage === 'processing' ||
+      activeStage.stage === 'dl_qos_prep' ||
+      activeStage.stage === 'dl_sending' ||
+      activeStage.stage === 'complete'
+        ? 'UPF - Shanghai'
+        : 'Pending',
+    activePathLabel: activeStage.pathSummary,
+    taskTitle: 'Robot dog visual inspection',
+    resultStatus: activeStage.resultStatus,
+    resultSummary: activeStage.resultSummary,
+    returnWindow:
+      activeStage.stage === 'dl_qos_prep' || activeStage.stage === 'dl_sending' || activeStage.stage === 'complete'
+        ? '12 ms target'
+        : 'Waiting for result',
+    stage: activeStage.stage,
+  };
 }
 
-function buildGraphBlueprint({
-  story,
-  sidecarStatus,
-  upfStatus,
-  flow,
-  flowActive,
-  storyLive,
-  activeProfileId,
-  showAuxiliary,
-  showTelemetry,
-}: {
-  story?: StorySummary;
-  sidecarStatus: SidecarStatus | null;
-  upfStatus: UPFStatus | null;
-  flow: FlowDetail | null;
-  flowActive: boolean;
-  storyLive: boolean;
-  activeProfileId: string;
-  showAuxiliary: boolean;
-  showTelemetry: boolean;
-}): GraphBlueprint {
-  const packetCount = upfStatus?.story?.packetCount || 0;
-  const hasProfile = !!activeProfileId;
+function buildGraph(snapshot: ReturnType<typeof buildSnapshot>) {
+  const usingServicePath =
+    snapshot.stage === 'service_path_selected' ||
+    snapshot.stage === 'processing' ||
+    snapshot.stage === 'dl_qos_prep' ||
+    snapshot.stage === 'dl_sending' ||
+    snapshot.stage === 'complete';
 
-  const nodes: Node<DeviceNodeData>[] = [
-    graphNode('ue-main', { x: 0, y: 120 }, {
-      label: 'UE',
-      kind: 'ue',
-      active: flowActive,
-      emphasis: storyLive,
-      meta: flow?.lastReport?.ueAddress || '10.60.0.1',
-      badges: [story?.scenario || 'demo', flow?.active ? 'active' : 'idle'],
+  const nodes: Array<Node<DemoNodeData | RegionNodeData>> = [
+    {
+      id: 'region-shenzhen',
+      type: 'region',
+      className: 'region-shell',
+      position: { x: -70, y: 58 },
+      draggable: false,
+      selectable: false,
+      data: { label: 'Shenzhen', tone: 'shenzhen' },
+      style: { width: 760, height: 470, zIndex: 0 },
+    },
+    {
+      id: 'region-backbone',
+      type: 'region',
+      className: 'region-shell',
+      position: { x: 835, y: 42 },
+      draggable: false,
+      selectable: false,
+      data: { label: 'Backbone', tone: 'backbone' },
+      style: { width: 520, height: 500, zIndex: 0 },
+    },
+    {
+      id: 'region-shanghai',
+      type: 'region',
+      className: 'region-shell',
+      position: { x: 1385, y: 58 },
+      draggable: false,
+      selectable: false,
+      data: { label: 'Shanghai', tone: 'shanghai' },
+      style: { width: 430, height: 470, zIndex: 0 },
+    },
+    graphNode('ue', { x: 38, y: 250 }, {
+      label: 'Robot Dog / UE',
+      kind: 'endpoint',
+      status: snapshot.stage === 'idle' ? 'Idle sensor endpoint' : snapshot.direction === 'DL' ? 'Receiving result payload' : 'Producing burst traffic',
+      sideTitle: snapshot.direction === 'NONE' ? 'Standby endpoint' : snapshot.direction === 'DL' ? 'Downlink receiving' : 'Uplink burst source',
+      sideValue: snapshot.direction === 'NONE' ? 'Idle' : formatBytes(snapshot.burstSize),
+      active: snapshot.stage !== 'idle' && snapshot.stage !== 'stopped',
+      emphasis: snapshot.stage === 'ul_qos_prep' || snapshot.stage === 'ul_sending' || snapshot.stage === 'dl_sending',
+      badges: [snapshot.direction === 'NONE' ? 'Standby' : `${snapshot.direction} active`, formatBytes(snapshot.burstSize)],
     }),
-    graphNode('ran-main', { x: 280, y: 120 }, {
-      label: 'gNB / RAN',
-      kind: 'ran',
-      active: !!story?.gnbDecision || storyLive,
-      emphasis: story?.gnbDecision === 'ACCEPTED',
-      meta: story?.gnbDecision || 'pending',
-      badges: story?.predictedAirDelayMs ? [`${story.predictedAirDelayMs} ms`] : ['radio path'],
+    graphNode('gnb', { x: 260, y: 132 }, {
+      label: 'gNB - Shenzhen',
+      kind: 'access',
+      status: snapshot.qosState,
+      sideTitle: 'RAN QoS state',
+      sideValue: snapshot.qosProfile,
+      active: snapshot.direction !== 'NONE',
+      emphasis: snapshot.stage === 'ul_qos_prep' || snapshot.stage === 'dl_qos_prep',
+      badges: [snapshot.qosProfile, snapshot.direction === 'NONE' ? 'No burst' : snapshot.direction],
     }),
-    graphNode('upf-main', { x: 560, y: 120 }, {
-      label: 'UPF',
+    graphNode('upf-shenzhen', { x: 500, y: 250 }, {
+      label: 'UPF - Shenzhen',
       kind: 'upf',
-      active: !!upfStatus?.running,
-      emphasis: packetCount > 0,
-      meta: upfStatus?.masqueAddr || 'core active',
-      badges: [hasProfile ? activeProfileId : 'default', `${packetCount} pkts`],
+      status: usingServicePath ? 'A-UPF active, direct N6 ghosted' : 'Ordinary breakout / local UPF',
+      sideTitle: usingServicePath ? 'Local role' : 'Direct route',
+      sideValue: usingServicePath ? 'A-UPF active' : 'N6 Direct Out',
+      role: usingServicePath ? 'ANCHOR' : snapshot.stage === 'idle' ? 'IDLE' : 'ANCHOR',
+      active: snapshot.stage !== 'idle' && snapshot.stage !== 'stopped',
+      emphasis: snapshot.stage === 'ul_sending' || snapshot.stage === 'service_path_selected',
+      badges: [snapshot.pathScore],
+      ports: [
+        { id: 'n3', label: 'N3', side: 'left' },
+        { id: 'n6', label: 'N6', side: 'right' },
+        { id: 'n9', label: 'N9', side: 'right' },
+      ],
     }),
-    graphNode('app-main', { x: 840, y: 120 }, {
-      label: 'Application',
-      kind: 'app',
-      active: flowActive,
-      emphasis: packetCount > 0,
-      meta: story?.flowDescription || '198.51.100.10:9999/udp',
-      badges: [story?.deadlineMs ? `${story.deadlineMs} ms deadline` : 'sink'],
+    graphNode('router-gz1', { x: 860, y: 112 }, {
+      label: 'Router GZ-1',
+      kind: 'router',
+      status: 'Shared backbone',
+      active: snapshot.stage !== 'idle' && snapshot.stage !== 'stopped',
+      emphasis: !usingServicePath && (snapshot.stage === 'ul_sending' || snapshot.stage === 'dl_sending'),
+      badges: ['N6 Direct Out', snapshot.latency],
+    }),
+    graphNode('router-sh1', { x: 1108, y: 112 }, {
+      label: 'Router SH-1',
+      kind: 'router',
+      status: 'Shared backbone',
+      active: snapshot.stage !== 'idle' && snapshot.stage !== 'stopped',
+      emphasis: !usingServicePath,
+      badges: ['N6 Direct Out', snapshot.bandwidth],
+    }),
+    graphNode('router-d1', { x: 860, y: 382 }, {
+      label: 'Router D-1',
+      kind: 'router',
+      status: 'Dedicated service path',
+      active: usingServicePath,
+      emphasis: usingServicePath,
+      badges: ['Dedicated A-UPF / S-UPF Path'],
+    }),
+    graphNode('router-d2', { x: 1108, y: 382 }, {
+      label: 'Router D-2',
+      kind: 'router',
+      status: 'Dedicated service path',
+      active: usingServicePath,
+      emphasis: usingServicePath,
+      badges: ['Dedicated A-UPF / S-UPF Path'],
+    }),
+    graphNode('upf-shanghai', { x: 1370, y: 250 }, {
+      label: 'UPF - Shanghai',
+      kind: 'upf',
+      status: usingServicePath ? 'S-UPF active near service' : 'Service-side UPF idle',
+      sideTitle: usingServicePath ? 'Remote role' : 'Service role',
+      sideValue: usingServicePath ? 'S-UPF active' : 'Standby',
+      role: usingServicePath ? 'SERVICE' : 'IDLE',
+      active: usingServicePath,
+      emphasis: snapshot.stage === 'service_path_selected' || snapshot.stage === 'processing' || snapshot.stage === 'dl_sending',
+      badges: [usingServicePath ? 'Dedicated path' : 'Idle'],
+      ports: [
+        { id: 'n9', label: 'N9', side: 'left' },
+        { id: 'n6', label: 'N6', side: 'right' },
+      ],
+    }),
+    graphNode('server', { x: 1605, y: 132 }, {
+      label: 'AI Inference Server',
+      kind: 'service',
+      status: snapshot.resultStatus,
+      sideTitle: 'Service side',
+      sideValue: snapshot.resultStatus,
+      active: snapshot.stage === 'processing' || snapshot.stage === 'dl_qos_prep' || snapshot.stage === 'dl_sending' || snapshot.stage === 'complete',
+      emphasis: snapshot.stage === 'processing' || snapshot.stage === 'complete',
+      badges: ['GPU pool', snapshot.stage === 'complete' ? 'Result ready' : 'Queued'],
     }),
   ];
 
-  if (showAuxiliary) {
-    nodes.push(
-      graphNode('sidecar-main', { x: 150, y: 300 }, {
-        label: 'UE Sidecar',
-        kind: 'sidecar',
-        active: !!sidecarStatus,
-        emphasis: storyLive,
-        meta: `${sidecarStatus?.activeFlows || 0} active flows`,
-        badges: ['MASQUE', story?.phase || 'standby'],
-      }),
-      graphNode('policy-main', { x: 560, y: 300 }, {
-        label: 'QoS Policy',
-        kind: 'policy',
-        active: hasProfile || !!upfStatus?.defaultQoSProfile,
-        emphasis: hasProfile && activeProfileId !== upfStatus?.defaultQoSProfile?.selectedProfileId,
-        meta: activeProfileId || upfStatus?.defaultQoSProfile?.selectedProfileId || 'default',
-        badges: [
-          formatBitrate(
-            upfStatus?.currentQoSProfile?.overrideMbrDl || upfStatus?.defaultQoSProfile?.overrideMbrDl,
-          ),
-        ],
-      }),
-    );
-  }
-
-  const edges: Edge<GraphEdgeData>[] = [
-    graphEdge('ue-ran', 'ue-main', 'ran-main', 'access', {
-      label: 'Radio access',
-      active: flowActive,
-      detail: 'UE traffic enters the radio path.',
+  const edges: Array<Edge<DemoEdgeData>> = [
+    graphEdge('ue-gnb', 'ue', 'gnb', 'burst', {
+      label: snapshot.direction === 'DL' ? 'DL air path' : 'UL air path',
+      state: snapshot.direction === 'NONE' ? 'idle' : 'active',
+      detail: 'Temporary air-interface treatment is visible before the burst starts.',
     }),
-    graphEdge('ran-upf', 'ran-main', 'upf-main', 'access', {
-      label: 'User plane',
-      active: story?.gnbDecision === 'ACCEPTED' || packetCount > 0,
-      emphasis: packetCount > 0,
-      detail: 'Forwarding from RAN into the UPF.',
+    graphEdge('gnb-upf-shenzhen', 'gnb', 'upf-shenzhen', 'burst', {
+      label: 'N3 ingress',
+      state: snapshot.stage === 'idle' || snapshot.stage === 'stopped' ? 'idle' : 'active',
+      detail: 'The local anchor UPF stays close to the user equipment.',
+      targetHandle: 'n3',
     }),
-    graphEdge('upf-app', 'upf-main', 'app-main', 'access', {
-      label: 'Service path',
-      active: packetCount > 0,
-      detail: 'Forwarded packets leave the UPF toward the application endpoint.',
+    graphEdge('upf-shenzhen-gz1', 'upf-shenzhen', 'router-gz1', 'baseline', {
+      label: 'N6 Direct Out',
+      state: usingServicePath ? 'idle' : snapshot.stage === 'ul_sending' || snapshot.stage === 'dl_sending' ? 'active' : 'selected',
+      detail: 'Ordinary breakout via shared backbone routers.',
+      sourceHandle: 'n6',
+    }),
+    graphEdge('gz1-sh1', 'router-gz1', 'router-sh1', 'baseline', {
+      label: 'Shared backbone',
+      state: usingServicePath ? 'idle' : 'selected',
+      detail: 'Less optimized ordinary route across shared transit.',
+    }),
+    graphEdge('sh1-server', 'router-sh1', 'server', 'baseline', {
+      label: 'N6 Direct Out',
+      state: usingServicePath ? 'idle' : snapshot.stage === 'processing' || snapshot.stage === 'dl_sending' ? 'active' : 'selected',
+      detail: 'Ordinary direct breakout to the Shanghai service side.',
+    }),
+    graphEdge('upf-shenzhen-d1', 'upf-shenzhen', 'router-d1', 'optimized', {
+      label: 'Dedicated A-UPF / S-UPF Path',
+      state: usingServicePath ? 'selected' : 'idle',
+      detail: 'Deliberately established service chain leaves Shenzhen UPF via N9.',
+      sourceHandle: 'n9',
+    }),
+    graphEdge('d1-d2', 'router-d1', 'router-d2', 'optimized', {
+      label: 'Dedicated transit',
+      state: usingServicePath ? 'selected' : 'idle',
+      detail: 'Dedicated inter-UPF corridor.',
+    }),
+    graphEdge('d2-upf-shanghai', 'router-d2', 'upf-shanghai', 'optimized', {
+      label: 'N9 service ingress',
+      state: usingServicePath ? 'selected' : 'idle',
+      detail: 'Remote service-side UPF receives traffic on N9.',
+      targetHandle: 'n9',
+    }),
+    graphEdge('upf-shanghai-server', 'upf-shanghai', 'server', 'optimized', {
+      label: 'Service-side N6',
+      state: usingServicePath ? 'active' : 'idle',
+      detail: 'S-UPF near the server exits to the AI service through N6.',
+      sourceHandle: 'n6',
     }),
   ];
-
-  if (showAuxiliary) {
-    edges.push(
-      graphEdge('ue-sidecar', 'ue-main', 'sidecar-main', 'tunnel', {
-        label: 'Local attach',
-        active: !!sidecarStatus,
-        detail: 'Local coordination between UE and sidecar.',
-      }),
-      graphEdge('sidecar-upf', 'sidecar-main', 'upf-main', 'tunnel', {
-        label: 'MASQUE tunnel',
-        active: storyLive || !!story?.phase,
-        emphasis: story?.phase === 'prepared',
-        detail: 'Sidecar signaling and transport coordination with the UPF.',
-      }),
-      graphEdge('policy-upf', 'policy-main', 'upf-main', 'qos', {
-        label: 'QoS profile',
-        active: hasProfile || !!upfStatus?.defaultQoSProfile,
-        emphasis: hasProfile,
-        detail: 'Selected policy profile applied by the UPF.',
-      }),
-    );
-  }
-
-  if (showTelemetry) {
-    if (showAuxiliary) {
-      edges.push(
-        graphEdge('sidecar-ran', 'sidecar-main', 'ran-main', 'telemetry', {
-          label: 'Assist hints',
-          active: !!story?.gnbDecision || !!story?.predictedAirDelayMs,
-          detail: 'Assistive decisioning or telemetry shared toward the radio path.',
-        }),
-      );
-    }
-    edges.push(
-      graphEdge('upf-policy-app', 'upf-main', showAuxiliary ? 'policy-main' : 'app-main', 'telemetry', {
-        label: showAuxiliary ? 'Usage feedback' : 'Usage signals',
-        active: packetCount > 0,
-        detail: 'Runtime signals flowing back from the UPF.',
-      }),
-    );
-  }
 
   return { nodes, edges };
 }
 
-function graphNode(id: string, position: { x: number; y: number }, data: DeviceNodeData): Node<DeviceNodeData> {
-  return {
-    id,
-    type: 'device',
-    position,
-    data,
-  };
+function graphNode(id: string, position: { x: number; y: number }, data: DemoNodeData): Node<DemoNodeData> {
+  return { id, type: 'mission', position, data };
 }
 
 function graphEdge(
@@ -820,94 +924,36 @@ function graphEdge(
   source: string,
   target: string,
   kind: LinkKind,
-  data: Omit<GraphEdgeData, 'kind'>,
-): Edge<GraphEdgeData> {
+  data: Omit<DemoEdgeData, 'kind'> & { sourceHandle?: string; targetHandle?: string },
+): Edge<DemoEdgeData> {
   return {
     id,
     source,
     target,
-    type: 'path',
-    animated: false,
-    data: { ...data, kind },
+    sourceHandle: data.sourceHandle,
+    targetHandle: data.targetHandle,
+    type: 'mission',
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      color: edgeMeta[kind].color,
+      color: edgeColor(kind, data.state),
+    },
+    data: {
+      ...data,
+      kind,
     },
   };
 }
 
-function nodeInspectorRows(
-  node: Node<DeviceNodeData>,
-  story: StorySummary | undefined,
-  flow: FlowDetail | null,
-  upfStatus: UPFStatus | null,
-) {
-  const rows: Array<{ label: string; value: string }> = [
-    { label: 'Kind', value: titleize(node.data.kind) },
-    { label: 'Status', value: node.data.active ? 'Active' : 'Idle' },
-  ];
-
-  if (node.data.meta) rows.push({ label: 'Primary', value: node.data.meta });
-
-  if (node.id === 'ue-main') {
-    rows.push({ label: 'Flow ID', value: story?.flowId || flow?.flowId || 'N/A' });
-  }
-  if (node.id === 'ran-main') {
-    rows.push({ label: 'Decision', value: story?.gnbDecision || 'Pending' });
-  }
-  if (node.id === 'upf-main') {
-    rows.push({ label: 'Packets', value: String(upfStatus?.story?.packetCount || 0) });
-    rows.push({
-      label: 'Profile',
-      value:
-        upfStatus?.currentQoSProfile?.selectedProfileId ||
-        upfStatus?.defaultQoSProfile?.selectedProfileId ||
-        'default',
-    });
-  }
-  if (node.id === 'policy-main') {
-    rows.push({
-      label: 'MBR DL',
-      value: formatBitrate(upfStatus?.currentQoSProfile?.overrideMbrDl || upfStatus?.defaultQoSProfile?.overrideMbrDl),
-    });
-  }
-
-  return rows;
+function edgeColor(kind: LinkKind, state: DemoEdgeData['state']) {
+  if (state === 'idle') return 'rgba(113, 137, 167, 0.38)';
+  if (kind === 'optimized') return '#45c3ff';
+  if (kind === 'burst') return '#97ffb8';
+  return '#f8c15d';
 }
 
-function formatTraceStage(stage?: string) {
-  if (!stage) return 'EVENT';
-  return stage.replace(/_/g, ' ').toUpperCase();
-}
-
-function titleize(value: string) {
-  return value
-    .split(/[-_ ]+/)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function linkDescription(kind: LinkKind) {
-  switch (kind) {
-    case 'access':
-      return 'Main traffic forwarding path between user, radio, and application.';
-    case 'tunnel':
-      return 'Overlay or sidecar-managed transport, including MASQUE.';
-    case 'qos':
-      return 'Policy or shaping relationship applied to traffic handling.';
-    case 'telemetry':
-      return 'Feedback, assist signals, or runtime reporting.';
-  }
-}
-
-function isRejectedStoryStart(resp: any) {
-  if (!resp || typeof resp !== 'object') return true;
-
-  const status = String(resp.status || resp.Status || '').toLowerCase();
-  if (status && ['rejected', 'error', 'failed', 'failure'].includes(status)) return true;
-
-  const reasonCode = String(resp.reasonCode || resp.ReasonCode || '').toUpperCase();
-  if (reasonCode && reasonCode !== 'ACCEPTED' && reasonCode !== 'OK') return true;
-
-  return false;
+function hasReached(stage: DemoStage, target: DemoStage) {
+  if (stage === 'idle' || stage === 'stopped') return false;
+  const current = stageIndexById.get(stage) ?? -1;
+  const desired = stageIndexById.get(target) ?? -1;
+  return current >= desired;
 }
