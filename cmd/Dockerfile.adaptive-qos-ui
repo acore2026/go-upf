@@ -1,0 +1,39 @@
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache nodejs npm
+
+WORKDIR /src/upf
+
+COPY base/free5gc/NFs/upf/go.mod base/free5gc/NFs/upf/go.sum ./
+RUN go mod download
+
+COPY base/free5gc/NFs/upf/ ./
+
+WORKDIR /src/upf/cmd/adaptive-qos-demo/qos
+RUN npm ci && npm run build
+
+WORKDIR /src/upf/cmd/adaptive-qos-demo/qos-graph-lab
+RUN npm ci && npm run build
+
+WORKDIR /src/upf/cmd/adaptive-qos-video-stream/webapp
+RUN npm ci && npm run build
+
+WORKDIR /src/upf
+RUN go build -o /out/adaptive-qos-demo ./cmd/adaptive-qos-demo
+RUN mkdir -p /out/adaptive-qos-video-stream/webapp
+RUN cp -r /src/upf/cmd/adaptive-qos-video-stream/webapp/dist /out/adaptive-qos-video-stream/webapp/dist
+
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /app
+
+COPY --from=builder /out/adaptive-qos-demo ./adaptive-qos-demo
+COPY --from=builder /out/adaptive-qos-video-stream ./adaptive-qos-video-stream
+
+ENV WEBAPP_DIST=adaptive-qos-video-stream/webapp/dist
+
+EXPOSE 8084
+
+ENTRYPOINT ["./adaptive-qos-demo"]
