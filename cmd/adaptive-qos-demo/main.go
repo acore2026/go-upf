@@ -19,20 +19,23 @@ import (
 	"time"
 )
 
-//go:embed static/*
-var staticFiles embed.FS
+//go:embed qos/dist/*
+var demoFiles embed.FS
 
-//go:embed webapp/dist/*
-var webappFiles embed.FS
+//go:embed qos-graph-lab/dist/*
+var graphLabFiles embed.FS
 
 type app struct {
 	sidecarBase *url.URL
 	upfBase     *url.URL
 	sidecarBin  string
 	sidecarCfg  string
+	webappPath  string
 	client      *http.Client
-	static      http.Handler
-	staticFS    fs.FS
+	demo        http.Handler
+	demoFS      fs.FS
+	graphLab    http.Handler
+	graphLabFS  fs.FS
 	webapp      http.Handler
 	webappFS    fs.FS
 	resetMu     sync.Mutex
@@ -58,15 +61,24 @@ func main() {
 		panic(fmt.Errorf("parse upf base: %w", err))
 	}
 
-	staticRoot, err := fs.Sub(staticFiles, "static")
+	demoRoot, err := fs.Sub(demoFiles, "qos/dist")
 	if err != nil {
-		panic(fmt.Errorf("load static files: %w", err))
+		// It's okay if qos/dist is not built yet during development
+		fmt.Printf("Warning: qos/dist not found, demo route will be empty: %v\n", err)
+		demoRoot = os.DirFS(".") // dummy
 	}
 
-	webappRoot, err := fs.Sub(webappFiles, "webapp/dist")
+	graphLabRoot, err := fs.Sub(graphLabFiles, "qos-graph-lab/dist")
 	if err != nil {
-		// It's okay if webapp is not built yet during development
-		fmt.Printf("Warning: webapp/dist not found, webapp route will be empty: %v\n", err)
+		// It's okay if qos-graph-lab/dist is not built yet during development
+		fmt.Printf("Warning: qos-graph-lab/dist not found, graph lab route will be empty: %v\n", err)
+		graphLabRoot = os.DirFS(".") // dummy
+	}
+
+	webappPath := getenvDefault("WEBAPP_DIST", "adaptive-qos-video-stream/webapp/dist")
+	webappRoot := os.DirFS(webappPath)
+	if _, err := fs.Stat(webappRoot, "index.html"); err != nil {
+		fmt.Printf("Warning: %s/index.html not found, webapp route will be empty: %v\n", webappPath, err)
 		webappRoot = os.DirFS(".") // dummy
 	}
 
@@ -75,16 +87,19 @@ func main() {
 		upfBase:     upfURL,
 		sidecarBin:  getenvDefault("SIDECAR_BIN", "./adaptive-qos-sidecar"),
 		sidecarCfg:  getenvDefault("SIDECAR_CONFIG", "./config/adaptive-qos-sidecar.yaml"),
+		webappPath:  webappPath,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
 				Proxy: nil,
 			},
 		},
-		static:   http.FileServer(http.FS(staticRoot)),
-		staticFS: staticRoot,
-		webapp:   http.FileServer(http.FS(webappRoot)),
-		webappFS: webappRoot,
+		demo:       http.FileServer(http.FS(demoRoot)),
+		demoFS:     demoRoot,
+		graphLab:   http.FileServer(http.FS(graphLabRoot)),
+		graphLabFS: graphLabRoot,
+		webapp:     http.FileServer(http.FS(webappRoot)),
+		webappFS:   webappRoot,
 	}
 
 	server := &http.Server{
@@ -93,8 +108,9 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	fmt.Printf("Starting adaptive-qos-demo on %s\n", listenAddr)
-	fmt.Printf("Static UI: http://%s/\n", listenAddr)
-	fmt.Printf("React Webapp: http://%s/webapp/\n", listenAddr)
+	fmt.Printf("Demo UI: http://%s/\n", listenAddr)
+	fmt.Printf("Graph Lab: http://%s/qos/\n", listenAddr)
+	fmt.Printf("Video Webapp: http://%s/webapp/ (dist: %s)\n", listenAddr, webappPath)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		panic(err)
@@ -106,46 +122,48 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("/api/reset", a.handleReset)
 	mux.HandleFunc("/api/sidecar/", a.handleSidecarProxy)
 	mux.HandleFunc("/api/upf/", a.handleUPFProxy)
-	mux.HandleFunc("/webapp/", a.handleWebapp)
-	mux.HandleFunc("/", a.handleStatic)
+	mux.HandleFunc("/webapp", a.handleWebappAlias)
+	mux.HandleFunc("/webapp/", a.handleWebappAlias)
+	mux.HandleFunc("/qos", a.handleGraphLabAlias)
+	mux.HandleFunc("/qos/", a.handleGraphLabAlias)
+	mux.HandleFunc("/qos-graph-lab", a.handleGraphLabAlias)
+	mux.HandleFunc("/qos-graph-lab/", a.handleGraphLabAlias)
+	mux.HandleFunc("/", a.handleDemoRoot)
 	return mux
 }
 
-func (a *app) handleStatic(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" {
-		b, err := fs.ReadFile(a.staticFS, "index.html")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(b)
-		return
-	}
-	a.static.ServeHTTP(w, r)
+func (a *app) handleDemoRoot(w http.ResponseWriter, r *http.Request) {
+	a.serveStaticApp(w, r, "", a.demo, a.demoFS, "Demo index.html not found")
 }
 
-func (a *app) handleWebapp(w http.ResponseWriter, r *http.Request) {
-	// If path is exactly /webapp, redirect to /webapp/
+func (a *app) handleGraphLabAlias(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/qos" || r.URL.Path == "/qos-graph-lab" {
+		http.Redirect(w, r, "/qos/", http.StatusMovedPermanently)
+		return
+	}
+	a.serveStaticApp(w, r, "/qos", a.graphLab, a.graphLabFS, "Graph lab index.html not found")
+}
+
+func (a *app) handleWebappAlias(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/webapp" {
 		http.Redirect(w, r, "/webapp/", http.StatusMovedPermanently)
 		return
 	}
+	a.serveStaticApp(w, r, "/webapp", a.webapp, a.webappFS, "Webapp index.html not found")
+}
 
-	// Serve the index.html for any path under /webapp/ to support client-side routing
-	// But first check if the file exists
-	relPath := strings.TrimPrefix(r.URL.Path, "/webapp/")
+func (a *app) serveStaticApp(w http.ResponseWriter, r *http.Request, prefix string, handler http.Handler, root fs.FS, notFoundMsg string) {
+	relPath := strings.TrimPrefix(r.URL.Path, prefix)
+	relPath = strings.TrimPrefix(relPath, "/")
 	if relPath == "" {
 		relPath = "index.html"
 	}
 
-	_, err := fs.Stat(a.webappFS, relPath)
+	_, err := fs.Stat(root, relPath)
 	if err != nil {
-		// If file not found, serve index.html (fallback for SPA)
-		b, err := fs.ReadFile(a.webappFS, "index.html")
+		b, err := fs.ReadFile(root, "index.html")
 		if err != nil {
-			http.Error(w, "Webapp index.html not found", http.StatusNotFound)
+			http.Error(w, notFoundMsg, http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -154,7 +172,11 @@ func (a *app) handleWebapp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.StripPrefix("/webapp/", a.webapp).ServeHTTP(w, r)
+	if prefix == "" {
+		http.StripPrefix("/", handler).ServeHTTP(w, r)
+		return
+	}
+	http.StripPrefix(prefix+"/", handler).ServeHTTP(w, r)
 }
 
 func (a *app) handleSidecarProxy(w http.ResponseWriter, r *http.Request) {
@@ -187,10 +209,20 @@ func (a *app) handleReset(w http.ResponseWriter, r *http.Request) {
 		resp["upf"] = map[string]any{"status": "reset"}
 	}
 
-	if err := a.restartSidecar(r.Context()); err != nil {
-		resp["sidecar"] = map[string]any{"status": "error", "error": err.Error()}
+	if err := a.callJSON(r.Context(), a.sidecarBase, "/reset", http.MethodPost); err != nil {
+		if fallbackErr := a.restartSidecar(r.Context()); fallbackErr != nil {
+			resp["sidecar"] = map[string]any{
+				"status": "error",
+				"error":  fmt.Sprintf("reset endpoint failed: %v; local restart failed: %v", err, fallbackErr),
+			}
+		} else {
+			resp["sidecar"] = map[string]any{
+				"status": "restarted",
+				"note":   fmt.Sprintf("sidecar reset endpoint unavailable, used local restart: %v", err),
+			}
+		}
 	} else {
-		resp["sidecar"] = map[string]any{"status": "restarted"}
+		resp["sidecar"] = map[string]any{"status": "reset"}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

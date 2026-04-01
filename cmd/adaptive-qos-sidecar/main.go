@@ -80,6 +80,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/reset", a.handleReset)
 	mux.HandleFunc("/status", a.handleStatus)
 	mux.HandleFunc("/trace", a.handleTrace)
 	mux.HandleFunc("/demo/story1/start", a.handleStory1Start)
@@ -101,6 +102,25 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (a *app) handleReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	a.mu.Lock()
+	a.trace = nil
+	a.flows = make(map[string]*client.AdaptiveFeedback)
+	a.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":      "reset",
+		"generatedAt": time.Now().UTC(),
+	})
 }
 
 func (a *app) handleTrace(w http.ResponseWriter, r *http.Request) {
