@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { 
   Repeat, Cpu, Play, Radio, Router, Smartphone, Square, Network,
-  UserCheck, Settings, Settings2, Database, Waypoints, Globe, Lock, Unlock, Sparkles, Bot, Wrench, LoaderCircle, BrainCircuit
+  UserCheck, Settings, Settings2, Database, Waypoints, Globe, Lock, Unlock, Sparkles, Bot, Wrench, LoaderCircle, BrainCircuit, CheckCircle2
 } from 'lucide-react';
 import { Background, BaseEdge, Handle, Position, ReactFlow, ReactFlowProvider, getBezierPath, getStraightPath, applyNodeChanges, applyEdgeChanges, type Edge, type EdgeProps, type Node, type NodeProps, type NodeTypes, type OnNodesChange, type OnEdgesChange } from '@xyflow/react';
 import { load as loadYaml } from 'js-yaml';
@@ -18,15 +18,20 @@ type DemoNodeData = {
   status?: string;
   role?: string; 
   active?: boolean; 
+  flashActive?: boolean;
+  transitioning?: boolean;
   processing?: boolean;
   context?: boolean;
   emphasis?: boolean; 
   handles?: string[];
   appearance?: 'default' | 'phone' | 'robot' | 'robot-arm' | 'gateway' | 'pill';
   message?: string;
-  plan?: { title: string; items: Array<{ id: string; label: string; done: boolean; active: boolean }> };
+  messageState?: 'processing' | 'done';
+  messageLeaving?: boolean;
+  plan?: { title: string; items: Array<{ id: string; label: string; phase: 'pending' | 'processing' | 'done'; bubbleText: string }> };
+  planLeaving?: boolean;
 };
-type DemoEdgeData = { kind: LinkKind; state: 'idle'|'active'|'selected'; note?: string; tone?: string; };
+type DemoEdgeData = { kind: LinkKind; state: 'idle'|'active'|'selected'; note?: string; tone?: string; transitioning?: boolean; };
 type RegionNodeData = { label: string; variant?: 'domain' | 'subdomain' | 'family' | 'external'; };
 type BusNodeData = { label: string; caption: string; idm: string; acnAgent: string; srf: string; scf: string; up: string; cmccGw: string; context?: boolean; emphasis?: boolean; };
 type ScriptBubble = { node: string; text: string };
@@ -38,12 +43,22 @@ type ScriptAction = {
   bubbles?: ScriptBubble[];
   revealNodes?: string[];
   delayMs?: number;
+  bubbleText?: {
+    plan?: string;
+    processing?: string;
+    done?: string;
+  };
 };
 type ScriptChecklist = {
   id: string;
   title?: string;
   type: 'checklist';
   delayMs?: number;
+  bubbleText?: {
+    plan?: string;
+    processing?: string;
+    done?: string;
+  };
   items: ScriptAction[];
 };
 type ScriptStep = ScriptAction | ScriptChecklist;
@@ -61,12 +76,18 @@ type FlatAction = ScriptAction & {
   stageIndex: number;
   stepLabel: string;
   checklistTitle?: string;
+  checklistBubbleText?: {
+    plan?: string;
+    processing?: string;
+    done?: string;
+  };
 };
 type PlaybackFrame = {
   phase: DemoPhase;
   stageIndex: number;
   actionIndex: number;
   actionId?: string;
+  checklistPhase?: 'processing' | 'finished' | 'checklist-finished';
   activeEdgeTone?: string;
   currentStageTitle?: string;
   nextStageTitle?: string;
@@ -76,11 +97,16 @@ type PlaybackFrame = {
   visibleNodeIds: string[];
   revealedNodeIds: string[];
   bubbles: Record<string, string>;
-  planBubble?: { nodeId: string; title: string; items: Array<{ id: string; label: string; done: boolean; active: boolean }> };
-  checklistItems: Array<{ id: string; label: string; done: boolean; active: boolean }>;
+  bubbleStates: Record<string, 'processing' | 'done'>;
+  planBubble?: { nodeId: string; title: string; items: Array<{ id: string; label: string; phase: 'pending' | 'processing' | 'done'; bubbleText: string }> };
+  checklistItems: Array<{ id: string; label: string; phase: 'pending' | 'processing' | 'done' }>;
 };
+type RetainedBubble = { text: string; state: 'processing' | 'done' };
+type RetainedPlan = NonNullable<PlaybackFrame['planBubble']>;
 
 const ACTION_DELAY_MS = 5000;
+const CHECKLIST_PROCESSING_DELAY_MS = 1000;
+const CHECKLIST_SETTLE_DELAY_MS = 500;
 const DEFAULT_SCRIPT_YAML = `standby:
   hiddenNodes:
     - robot-dog
@@ -101,12 +127,17 @@ stages:
       - id: stage1-checklist
         type: checklist
         title: acn agent bubbles a checklist
-        delayMs: 3500
+        delayMs: 1000
+        bubbleText:
+          done: "workflow digital id success"
         items:
           - id: stage1-apply-digital-id
             kind: talk
             path: [acn-agent, idm]
-            delayMs: 2500
+            bubbleText:
+              plan: "Assign digital id"
+              processing: "Assigning digital id"
+              done: "Digital ID assigned"
             bubbles:
               - node: idm
                 text: "digital id assigned: DIDI"
@@ -115,14 +146,20 @@ stages:
           - id: stage1-publish-agent-card
             kind: talk
             path: [acn-agent, agent-gw]
-            delayMs: 2500
+            bubbleText:
+              plan: "Publish agent card"
+              processing: "Publishing agent card"
+              done: "Agent card published"
             bubbles:
               - node: agent-gw
                 text: "agent card added: DIDI"
           - id: stage1-setup-family-domain
             kind: talk
             path: [acn-agent, up, scf]
-            delayMs: 3500
+            bubbleText:
+              plan: "Setup family domain"
+              processing: "Setting up family domain"
+              done: "Family domain created"
             bubbles:
               - node: up
                 text: Family Domain created
@@ -144,16 +181,24 @@ stages:
       - id: stage2-checklist
         type: checklist
         title: Ordering Agent order ready for pickup
-        delayMs: 3200
+        delayMs: 1000
+        bubbleText:
+          done: "workflow order pickup success"
         items:
           - id: stage2-discover-delivery-agent
             kind: talk
             path: [ott-ordering, mno-gw]
-            delayMs: 2600
+            bubbleText:
+              plan: "Discover delivery agent"
+              processing: "Discovering delivery agent"
+              done: "Delivery agent discovered"
           - id: stage2-assign-delivery-task
             kind: talk
             path: [ott-ordering, mno-endpoint]
-            delayMs: 2600
+            bubbleText:
+              plan: "Assign delivery task"
+              processing: "Assigning delivery task"
+              done: "Delivery task assigned"
             bubbles:
               - node: mno-endpoint
                 text: "task received"
@@ -178,25 +223,32 @@ stages:
       - id: stage4-verify
         type: checklist
         title: Robot Arm -> Robot Dog
-        delayMs: 3200
+        delayMs: 1000
+        bubbleText:
+          done: "workflow peer verification success"
         items:
           - id: stage4-dog-verify
             kind: talk
             path: [mno-endpoint, robot-dog]
-            delayMs: 2500
+            bubbleText:
+              plan: "Verify peer digital id"
+              processing: "Verifying peer digital id"
+              done: "Peer digital ID verified"
             bubbles:
               - node: robot-dog
                 text: "verify peer digital id"
           - id: stage4-arm-verify
             kind: talk
             path: [mno-endpoint, robot-dog]
-            delayMs: 2500
+            bubbleText:
+              plan: "Verify peer digital id"
+              processing: "Verifying peer digital id"
+              done: "Peer digital ID verified"
             bubbles:
               - node: mno-endpoint
                 text: "verify peer digital id"
           - id: stage4-idm-flash
             kind: flash
-            delayMs: 1800
             nodes: [idm]
 `;
 
@@ -231,6 +283,13 @@ function normalizeStep(step: any, stageIndex: number, stepIndex: number): Script
       type: 'checklist',
       title: step.title ? String(step.title) : undefined,
       delayMs: typeof step.delayMs === 'number' && Number.isFinite(step.delayMs) ? step.delayMs : undefined,
+      bubbleText: step.bubbleText && typeof step.bubbleText === 'object'
+        ? {
+            plan: typeof step.bubbleText.plan === 'string' ? step.bubbleText.plan : undefined,
+            processing: typeof step.bubbleText.processing === 'string' ? step.bubbleText.processing : undefined,
+            done: typeof step.bubbleText.done === 'string' ? step.bubbleText.done : undefined,
+          }
+        : undefined,
       items: Array.isArray(step.items)
         ? step.items.map((item: any, itemIndex: number) => normalizeTalkAction(item, stageIndex, stepIndex, itemIndex))
         : [],
@@ -252,6 +311,13 @@ function normalizeTalkAction(step: any, stageIndex: number, stepIndex: number, i
           .map((bubble: any) => ({ node: bubble.node, text: bubble.text }))
       : undefined,
     revealNodes: Array.isArray(step?.revealNodes) ? step.revealNodes.filter((value: any) => typeof value === 'string') : undefined,
+    bubbleText: step?.bubbleText && typeof step.bubbleText === 'object'
+      ? {
+          plan: typeof step.bubbleText.plan === 'string' ? step.bubbleText.plan : undefined,
+          processing: typeof step.bubbleText.processing === 'string' ? step.bubbleText.processing : undefined,
+          done: typeof step.bubbleText.done === 'string' ? step.bubbleText.done : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -263,12 +329,13 @@ function flattenStage(stage: ScriptStage): FlatAction[] {
       step.items.forEach((item) => {
         actions.push({
           ...(item as ScriptAction),
-          delayMs: item.delayMs ?? checklistDelayMs,
+          delayMs: item.delayMs ?? checklistDelayMs ?? CHECKLIST_PROCESSING_DELAY_MS,
           stageId: stage.id,
           stageTitle: stage.title,
           stageIndex: 0,
           stepLabel: checklistDisplayId(item.id),
           checklistTitle: step.title,
+          checklistBubbleText: step.bubbleText,
         } as FlatAction);
       });
       continue;
@@ -302,6 +369,25 @@ function checklistDisplayId(id: string) {
   return id.replace(/^stage\d+-/, '');
 }
 
+function getChecklistOriginNode(action: FlatAction) {
+  return action.path?.[0] ?? action.nodes?.[0] ?? action.id;
+}
+
+function getChecklistTargetNode(action: FlatAction) {
+  const explicitBubbleTarget = action.bubbles?.[0]?.node;
+  if (explicitBubbleTarget) {
+    return explicitBubbleTarget;
+  }
+  return action.path?.at(-1) ?? action.nodes?.at(-1) ?? action.id;
+}
+
+function getChecklistGroup(actions: FlatAction[], action?: FlatAction) {
+  if (!action?.checklistTitle) {
+    return [];
+  }
+  return actions.filter((item) => item.checklistTitle === action.checklistTitle);
+}
+
 function deriveVisibleNodeIds(script: DemoScript, revealedNodeIds: string[]) {
   const visible = new Set<string>();
   for (const node of [...ALL_NODE_IDS, ...ALL_REGION_IDS]) {
@@ -324,30 +410,75 @@ function createStandbyFrame(script: DemoScript): PlaybackFrame {
       phase: 'standby',
       stageIndex: -1,
       actionIndex: -1,
+      checklistPhase: undefined,
       activeEdgeTone: undefined,
       activeNodeIds: [],
       activeEdgeIds: [],
       visibleNodeIds: deriveVisibleNodeIds(script, []),
       revealedNodeIds: [],
       bubbles: {},
+      bubbleStates: {},
       planBubble: undefined,
       checklistItems: [],
     };
 }
 
-function buildPlaybackFrame(script: DemoScript, stageIndex: number, actionIndex: number, phase: DemoPhase, revealedNodeIds: string[]): PlaybackFrame {
+function createIdleFrame(
+  script: DemoScript,
+  phase: 'gate' | 'paused' | 'complete',
+  stageIndex: number,
+  actionIndex: number,
+  revealedNodeIds: string[],
+): PlaybackFrame {
+  const stage = script.stages[stageIndex];
+  const nextStage = script.stages[stageIndex + 1];
+  const checklistItems = stage ? flattenStage(stage).map((item) => ({
+    id: item.id,
+    label: item.checklistTitle ? checklistDisplayId(item.id) : item.stepLabel,
+    phase: 'pending' as const,
+  })) : [];
+
+  return {
+    phase,
+    stageIndex,
+    actionIndex,
+    checklistPhase: undefined,
+    activeEdgeTone: undefined,
+    currentStageTitle: stage?.title,
+    nextStageTitle: nextStage?.title ?? 'Finish',
+    activeNodeIds: [],
+    activeEdgeIds: [],
+    visibleNodeIds: deriveVisibleNodeIds(script, revealedNodeIds),
+    revealedNodeIds,
+    bubbles: {},
+    bubbleStates: {},
+    planBubble: undefined,
+    checklistItems,
+  };
+}
+
+function buildPlaybackFrame(
+  script: DemoScript,
+  stageIndex: number,
+  actionIndex: number,
+  phase: DemoPhase,
+  revealedNodeIds: string[],
+  checklistPhase?: 'processing' | 'finished' | 'checklist-finished',
+): PlaybackFrame {
   const stage = script.stages[stageIndex];
   if (!stage) {
     return {
       phase: 'complete',
       stageIndex,
       actionIndex,
+      checklistPhase: undefined,
       activeEdgeTone: undefined,
       activeNodeIds: [],
       activeEdgeIds: [],
       visibleNodeIds: deriveVisibleNodeIds(script, revealedNodeIds),
       revealedNodeIds,
       bubbles: {},
+      bubbleStates: {},
       planBubble: undefined,
       checklistItems: [],
     };
@@ -355,19 +486,32 @@ function buildPlaybackFrame(script: DemoScript, stageIndex: number, actionIndex:
 
   const actions = flattenStage(stage);
   const action = actions[actionIndex];
+  const effectiveChecklistPhase = action.checklistTitle ? (checklistPhase ?? 'processing') : undefined;
   const nextStage = script.stages[stageIndex + 1];
-  const checklistItems = actions.map((item, index) => ({
-    id: item.id,
+  const checklistGroup = getChecklistGroup(actions, action);
+  const currentChecklistIndex = action.checklistTitle
+    ? checklistGroup.findIndex((item) => item.id === action.id)
+    : -1;
+  const checklistItems: PlaybackFrame['checklistItems'] = actions.map((item, index) => {
+    const phase: 'pending' | 'processing' | 'done' =
+      index < actionIndex
+        ? 'done'
+        : action.checklistTitle === item.checklistTitle && index === actionIndex
+          ? (effectiveChecklistPhase === 'processing' ? 'processing' : 'done')
+          : 'pending';
+    return {
+      id: item.id,
     label: item.checklistTitle ? checklistDisplayId(item.id) : item.stepLabel,
-    done: index < actionIndex || (action.checklistTitle === item.checklistTitle && index === actionIndex),
-    active: index === actionIndex,
-  }));
+    phase,
+  };
+  });
 
   if (!action) {
     return {
       phase,
       stageIndex,
       actionIndex,
+      checklistPhase: undefined,
       activeEdgeTone: undefined,
       currentStageTitle: stage.title,
       nextStageTitle: nextStage?.title ?? 'Finish',
@@ -376,6 +520,7 @@ function buildPlaybackFrame(script: DemoScript, stageIndex: number, actionIndex:
       visibleNodeIds: deriveVisibleNodeIds(script, revealedNodeIds),
       revealedNodeIds,
       bubbles: {},
+      bubbleStates: {},
       planBubble: undefined,
       checklistItems,
     };
@@ -383,13 +528,38 @@ function buildPlaybackFrame(script: DemoScript, stageIndex: number, actionIndex:
 
   const pathNodeIds = action.path ?? action.nodes ?? [];
   const edgeIds = resolvePathEdgeIds(pathNodeIds);
-  const bubbles = Object.fromEntries((action.bubbles ?? []).map((bubble) => [bubble.node, bubble.text]));
-  const checklistGroup = action.checklistTitle
-    ? actions.filter((item) => item.checklistTitle === action.checklistTitle)
-    : [];
-  const currentChecklistIndex = action.checklistTitle
-    ? checklistGroup.findIndex((item) => item.id === action.id)
-    : -1;
+  const checklistOriginNode = action.checklistTitle ? getChecklistOriginNode(action) : undefined;
+  const checklistTargetNode = action.checklistTitle ? getChecklistTargetNode(action) : undefined;
+  const checklistBubbleText = action.checklistTitle ? action.checklistBubbleText : undefined;
+  const checklistCompleted = action.checklistTitle && effectiveChecklistPhase === 'checklist-finished';
+  const stepProcessingText = action.bubbleText?.processing ?? action.bubbleText?.plan ?? action.stepLabel;
+  const stepDoneText = action.bubbleText?.done ?? action.bubbleText?.processing ?? action.bubbleText?.plan ?? action.stepLabel;
+  const bubbles = action.checklistTitle
+    ? (
+        effectiveChecklistPhase === 'checklist-finished'
+          ? (checklistBubbleText?.done && checklistOriginNode
+              ? { [checklistOriginNode]: checklistBubbleText.done }
+              : {})
+          : (checklistTargetNode
+              ? {
+                  [checklistTargetNode]: effectiveChecklistPhase === 'finished'
+                    ? stepDoneText
+                    : stepProcessingText,
+                }
+              : {})
+      )
+    : Object.fromEntries((action.bubbles ?? []).map((bubble) => [bubble.node, bubble.text]));
+  const bubbleStates = action.checklistTitle
+    ? (
+        effectiveChecklistPhase === 'checklist-finished'
+          ? (checklistOriginNode ? { [checklistOriginNode]: 'done' as const } : {})
+          : (checklistTargetNode
+              ? {
+                  [checklistTargetNode]: effectiveChecklistPhase === 'finished' ? 'done' as const : 'processing' as const,
+                }
+              : {})
+      )
+    : (Object.fromEntries((action.bubbles ?? []).map((bubble) => [bubble.node, 'processing' as const])) as Record<string, 'processing' | 'done'>);
   const currentVisible = new Set(deriveVisibleNodeIds(script, revealedNodeIds));
   for (const nodeId of action.revealNodes ?? []) {
     currentVisible.add(nodeId);
@@ -397,9 +567,11 @@ function buildPlaybackFrame(script: DemoScript, stageIndex: number, actionIndex:
   const bubbleNodeIds = (action.bubbles ?? []).map((bubble) => bubble.node);
   const activeNodeIds = action.kind === 'flash'
     ? [...new Set([...(action.nodes ?? []), ...bubbleNodeIds])]
+    : action.checklistTitle && effectiveChecklistPhase === 'checklist-finished'
+      ? [...new Set([checklistOriginNode, ...(action.revealNodes ?? [])].filter(Boolean) as string[])]
     : [...new Set([
         ...(pathNodeIds.length ? [pathNodeIds[0], pathNodeIds[pathNodeIds.length - 1]] : []),
-        ...bubbleNodeIds,
+        ...(action.checklistTitle ? [checklistOriginNode, checklistTargetNode].filter(Boolean) as string[] : bubbleNodeIds),
         ...(action.revealNodes ?? []),
       ])];
 
@@ -408,32 +580,57 @@ function buildPlaybackFrame(script: DemoScript, stageIndex: number, actionIndex:
     stageIndex,
     actionIndex,
     actionId: action.id,
+    checklistPhase: effectiveChecklistPhase,
     activeEdgeTone: action.kind === 'talk' ? '#7c3aed' : '#10b981',
     currentStageTitle: stage.title,
     nextStageTitle: nextStage?.title ?? 'Finish',
-    currentStepLabel: action.stepLabel,
+    currentStepLabel: action.checklistTitle
+      ? effectiveChecklistPhase === 'checklist-finished'
+        ? `Checklist finished: ${action.checklistTitle}`
+        : `${effectiveChecklistPhase === 'finished' ? 'Finished' : 'Processing'}: ${action.stepLabel}`
+      : action.stepLabel,
     activeNodeIds,
-    activeEdgeIds: edgeIds,
+    activeEdgeIds: action.checklistTitle && effectiveChecklistPhase === 'checklist-finished' ? [] : edgeIds,
     visibleNodeIds: [...currentVisible],
     revealedNodeIds: [...new Set([...revealedNodeIds, ...(action.revealNodes ?? [])])],
     bubbles,
-    planBubble: action.checklistTitle ? {
-      nodeId: action.path?.[0] ?? action.nodes?.[0] ?? action.id,
+    bubbleStates,
+    planBubble: action.checklistTitle && !checklistCompleted ? {
+      nodeId: checklistOriginNode ?? action.id,
       title: action.checklistTitle,
-      items: checklistGroup.map((item, index) => ({
-        id: item.id,
-        label: checklistDisplayId(item.id),
-        done: index <= currentChecklistIndex,
-        active: index === currentChecklistIndex,
-      })),
+      items: checklistGroup.map((item, index) => {
+        const phase: 'pending' | 'processing' | 'done' =
+          index < currentChecklistIndex
+            ? 'done'
+            : index === currentChecklistIndex
+              ? (effectiveChecklistPhase === 'processing' ? 'processing' : 'done')
+              : 'pending';
+        return {
+          id: item.id,
+          label: item.bubbleText?.plan ?? checklistDisplayId(item.id),
+          phase,
+          bubbleText: phase === 'processing'
+            ? item.bubbleText?.processing ?? item.bubbleText?.plan ?? checklistDisplayId(item.id)
+            : phase === 'done'
+              ? item.bubbleText?.done ?? item.bubbleText?.processing ?? item.bubbleText?.plan ?? checklistDisplayId(item.id)
+              : item.bubbleText?.plan ?? checklistDisplayId(item.id),
+        };
+      }),
     } : undefined,
     checklistItems,
   };
 }
 
-function resolveActionDelay(action?: FlatAction) {
+function resolveTalkDelay(action?: FlatAction) {
   if (!action || typeof action.delayMs !== 'number' || !Number.isFinite(action.delayMs)) {
     return ACTION_DELAY_MS;
+  }
+  return Math.max(0, action.delayMs);
+}
+
+function resolveChecklistProcessingDelay(action?: FlatAction) {
+  if (!action || typeof action.delayMs !== 'number' || !Number.isFinite(action.delayMs)) {
+    return CHECKLIST_PROCESSING_DELAY_MS;
   }
   return Math.max(0, action.delayMs);
 }
@@ -578,17 +775,24 @@ function Dashboard() {
   const [playback, setPlayback] = useState<PlaybackFrame>(() => createStandbyFrame(parseDemoScript(DEFAULT_SCRIPT_YAML)));
   const [nodes, setNodes] = useState<Node[]>(() => buildGraph(scriptDoc, playback).nodes);
   const [edges, setEdges] = useState<Edge[]>(() => buildGraph(scriptDoc, playback).edges);
+  const [transitioningNodeIds, setTransitioningNodeIds] = useState<string[]>([]);
+  const [transitioningEdgeIds, setTransitioningEdgeIds] = useState<string[]>([]);
+  const [transitioningBubbles, setTransitioningBubbles] = useState<Record<string, RetainedBubble>>({});
+  const [transitioningPlans, setTransitioningPlans] = useState<Record<string, RetainedPlan>>({});
   const scriptRef = useRef(scriptDoc);
   const playbackRef = useRef(playback);
+  const transitionRef = useRef<{
+    nodeIds: string[];
+    edgeIds: string[];
+    bubbles: Record<string, RetainedBubble>;
+    planBubble?: RetainedPlan;
+  }>({ nodeIds: [], edgeIds: [], bubbles: {}, planBubble: undefined });
+  const transitionTimerRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
     scriptRef.current = scriptDoc;
   }, [scriptDoc]);
-
-  useEffect(() => {
-    playbackRef.current = playback;
-  }, [playback]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -596,6 +800,63 @@ function Dashboard() {
       timerRef.current = null;
     }
   }, []);
+
+  const clearTransitionTimer = useCallback(() => {
+    if (transitionTimerRef.current !== null) {
+      window.clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    playbackRef.current = playback;
+  }, [playback]);
+
+  useEffect(() => {
+    const previous = transitionRef.current;
+    const nextNodeIds = playback.activeNodeIds;
+    const nextEdgeIds = playback.activeEdgeIds;
+    const nextBubbles = Object.fromEntries(
+      Object.entries(playback.bubbles).map(([nodeId, text]) => [nodeId, { text, state: playback.bubbleStates[nodeId] ?? 'processing' }]),
+    ) as Record<string, RetainedBubble>;
+    const nextPlan = playback.planBubble;
+    const leavingNodeIds = previous.nodeIds.filter((id) => !nextNodeIds.includes(id));
+    const leavingEdgeIds = previous.edgeIds.filter((id) => !nextEdgeIds.includes(id));
+    const leavingBubbles = Object.fromEntries(
+      Object.entries(previous.bubbles).filter(([nodeId, bubble]) => {
+        const nextBubble = nextBubbles[nodeId];
+        return !nextBubble || nextBubble.text !== bubble.text || nextBubble.state !== bubble.state;
+      }),
+    ) as Record<string, RetainedBubble>;
+    const leavingPlan = previous.planBubble && (
+      !nextPlan
+      || nextPlan.nodeId !== previous.planBubble.nodeId
+      || nextPlan.title !== previous.planBubble.title
+      || JSON.stringify(nextPlan.items) !== JSON.stringify(previous.planBubble.items)
+    )
+      ? previous.planBubble
+      : undefined;
+    transitionRef.current = { nodeIds: nextNodeIds, edgeIds: nextEdgeIds, bubbles: nextBubbles, planBubble: nextPlan };
+    clearTransitionTimer();
+    if (leavingNodeIds.length || leavingEdgeIds.length || Object.keys(leavingBubbles).length || leavingPlan) {
+      setTransitioningNodeIds(leavingNodeIds);
+      setTransitioningEdgeIds(leavingEdgeIds);
+      setTransitioningBubbles(leavingBubbles);
+      setTransitioningPlans(leavingPlan ? { [leavingPlan.nodeId]: leavingPlan } : {});
+      transitionTimerRef.current = window.setTimeout(() => {
+        setTransitioningNodeIds([]);
+        setTransitioningEdgeIds([]);
+        setTransitioningBubbles({});
+        setTransitioningPlans({});
+        transitionTimerRef.current = null;
+      }, 260);
+    } else {
+      setTransitioningNodeIds([]);
+      setTransitioningEdgeIds([]);
+      setTransitioningBubbles({});
+      setTransitioningPlans({});
+    }
+  }, [clearTransitionTimer, playback.activeEdgeIds, playback.activeNodeIds, playback.bubbles, playback.bubbleStates, playback.planBubble]);
 
   const applyScriptText = useCallback((nextText: string) => {
     setScriptText(nextText);
@@ -622,7 +883,9 @@ function Dashboard() {
         return createStandbyFrame(script);
       }
       if (mode === 'pause') {
-        return prev.phase === 'running' ? { ...prev, phase: 'paused' } : prev;
+        return prev.phase === 'running'
+          ? createIdleFrame(script, 'paused', prev.stageIndex, prev.actionIndex, prev.revealedNodeIds)
+          : prev;
       }
       if (mode === 'start') {
         if (prev.phase === 'running' || prev.phase === 'gate') {
@@ -634,7 +897,7 @@ function Dashboard() {
         if (script.stages.length === 0) {
           return createStandbyFrame(script);
         }
-        return buildPlaybackFrame(script, 0, 0, 'running', []);
+        return buildPlaybackFrame(script, 0, 0, 'running', [], undefined);
       }
       if (mode === 'continue') {
         if (prev.phase !== 'gate') {
@@ -642,16 +905,9 @@ function Dashboard() {
         }
         const nextStageIndex = prev.stageIndex + 1;
         if (nextStageIndex >= script.stages.length) {
-          return {
-            ...prev,
-            phase: 'complete',
-            nextStageTitle: 'Finish',
-            activeNodeIds: [],
-            activeEdgeIds: [],
-            bubbles: {},
-          };
+          return createIdleFrame(script, 'complete', prev.stageIndex, prev.actionIndex, prev.revealedNodeIds);
         }
-        return buildPlaybackFrame(script, nextStageIndex, 0, 'running', prev.revealedNodeIds);
+        return buildPlaybackFrame(script, nextStageIndex, 0, 'running', prev.revealedNodeIds, undefined);
       }
       if (prev.phase !== 'running') {
         return prev;
@@ -659,22 +915,40 @@ function Dashboard() {
       const actions = getActionsForStage(script, prev.stageIndex);
       const currentAction = actions[prev.actionIndex];
       const revealed = applyActionReveal(prev.revealedNodeIds, currentAction);
+      if (currentAction?.checklistTitle) {
+        if (prev.checklistPhase === 'processing' || prev.checklistPhase === undefined) {
+          return buildPlaybackFrame(script, prev.stageIndex, prev.actionIndex, 'running', revealed, 'finished');
+        }
+        if (prev.checklistPhase === 'finished') {
+          const checklistGroup = getChecklistGroup(actions, currentAction);
+          const currentChecklistIndex = checklistGroup.findIndex((item) => item.id === currentAction.id);
+          const isFinalChecklistItem = currentChecklistIndex >= 0 && currentChecklistIndex === checklistGroup.length - 1;
+          if (isFinalChecklistItem) {
+            return buildPlaybackFrame(script, prev.stageIndex, prev.actionIndex, 'running', revealed, 'checklist-finished');
+          }
+          const nextActionIndex = prev.actionIndex + 1;
+          if (nextActionIndex < actions.length) {
+            return buildPlaybackFrame(script, prev.stageIndex, nextActionIndex, 'running', revealed, 'processing');
+          }
+          return createIdleFrame(script, 'gate', prev.stageIndex, prev.actionIndex, revealed);
+        }
+      }
       const nextActionIndex = prev.actionIndex + 1;
       if (nextActionIndex < actions.length) {
-        return buildPlaybackFrame(script, prev.stageIndex, nextActionIndex, 'running', revealed);
+        return buildPlaybackFrame(script, prev.stageIndex, nextActionIndex, 'running', revealed, undefined);
       }
-      return buildPlaybackFrame(script, prev.stageIndex, prev.actionIndex, 'gate', revealed);
+      return createIdleFrame(script, 'gate', prev.stageIndex, prev.actionIndex, revealed);
     });
   }, [clearTimer, getActionsForStage]);
 
   useEffect(() => {
-    const graph = buildGraph(scriptDoc, playback);
+    const graph = buildGraph(scriptDoc, playback, transitioningNodeIds, transitioningEdgeIds, transitioningBubbles, transitioningPlans);
     setNodes((prev) => graph.nodes.map((node) => {
       const previous = prev.find((candidate) => candidate.id === node.id);
       return previous ? { ...node, position: previous.position } : node;
     }));
     setEdges(graph.edges);
-  }, [playback, scriptDoc]);
+  }, [playback, scriptDoc, transitioningBubbles, transitioningEdgeIds, transitioningNodeIds, transitioningPlans]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -731,12 +1005,21 @@ function Dashboard() {
     if (playback.phase !== 'running') {
       return undefined;
     }
-    const delayMs = resolveActionDelay(activeAction);
+    if (activeAction?.checklistTitle) {
+      const delayMs = playback.checklistPhase === 'finished' || playback.checklistPhase === 'checklist-finished'
+        ? CHECKLIST_SETTLE_DELAY_MS
+        : resolveChecklistProcessingDelay(activeAction);
+      timerRef.current = window.setTimeout(() => {
+        updatePlayback('timer');
+      }, delayMs);
+      return () => clearTimer();
+    }
+    const delayMs = resolveTalkDelay(activeAction);
     timerRef.current = window.setTimeout(() => {
       updatePlayback('timer');
     }, delayMs);
     return () => clearTimer();
-  }, [activeAction, clearTimer, playback.actionIndex, playback.phase, playback.stageIndex, updatePlayback]);
+  }, [activeAction, clearTimer, getActionsForStage, playback.actionIndex, playback.checklistPhase, playback.phase, playback.stageIndex, updatePlayback]);
 
   const currentStatus = playback.phase === 'standby'
     ? 'STANDBY'
@@ -791,6 +1074,7 @@ function Dashboard() {
             nodesDraggable={!isLocked}
             panOnDrag
             zoomOnScroll
+            onlyRenderVisibleElements
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={40} size={1} color="#f1f5f9" />
@@ -860,15 +1144,17 @@ function MissionNode({ data }: NodeProps<Node<DemoNodeData>>) {
       data.context && "mission-node-context",
       data.emphasis && "mission-node-emphasis",
       data.active && "mission-node-active-shell",
+      data.flashActive && "mission-node-flash-shell",
+      data.transitioning && "mission-node-transitioning-shell",
       data.appearance === 'gateway' && "mission-node-gateway-shell",
       data.appearance === 'pill' && "mission-node-pill-shell",
       data.appearance === 'phone' && "mission-node-phone-shell",
       (data.appearance === 'robot' || data.appearance === 'robot-arm') && "mission-node-robot-shell",
-      data.kind === 'robot' && data.processing && data.message && "mission-node-robot-bubble",
-      ((data.processing && data.message) || data.plan) && "mission-node-with-bubble",
+      data.kind === 'robot' && data.message && "mission-node-robot-bubble",
+      (data.message || data.plan) && "mission-node-with-bubble",
     )} style={{ '--node-tint': meta.tint } as any}>
       {data.plan && (
-        <div className="mission-node-plan">
+        <div className={cn("mission-node-plan", data.planLeaving && "mission-node-plan-leaving")}>
           <div className="mission-node-plan-header">
             <LoaderCircle size={12} className="mission-node-plan-icon" />
             <span className="mission-node-plan-title">Plan</span>
@@ -876,21 +1162,34 @@ function MissionNode({ data }: NodeProps<Node<DemoNodeData>>) {
           </div>
           <div className="mission-node-plan-list">
             {data.plan.items.map((item) => (
-              <div key={item.id} className={cn("mission-node-plan-item", item.active && "mission-node-plan-item-active", item.done && "mission-node-plan-item-done")}>
-                <span className="mission-node-plan-check">{item.done ? '✓' : ''}</span>
-                <span className="mission-node-plan-text">{item.label}</span>
+              <div key={item.id} className={cn(
+                "mission-node-plan-item",
+                item.phase === 'processing' && "mission-node-plan-item-processing",
+                item.phase === 'done' && "mission-node-plan-item-done",
+              )}>
+                <span className={cn("mission-node-plan-check", `mission-node-plan-check-${item.phase}`)}>
+                  {item.phase === 'processing' ? <LoaderCircle size={9} className="mission-node-plan-check-icon" /> : item.phase === 'done' ? '✓' : ''}
+                </span>
+                <div className="mission-node-plan-copy">
+                  <span className="mission-node-plan-text">{item.label}</span>
+                  <span className="mission-node-plan-phase">
+                    {item.phase}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
       {data.message && (
-        <div className="mission-node-bubble">
-          <LoaderCircle size={12} className="mission-node-bubble-icon" />
+        <div className={cn("mission-node-bubble", data.messageState === 'done' && "mission-node-bubble-done", data.messageLeaving && "mission-node-bubble-leaving")}>
+          {data.messageState === 'done'
+            ? <CheckCircle2 size={12} className="mission-node-bubble-icon mission-node-bubble-icon-done" />
+            : <LoaderCircle size={12} className="mission-node-bubble-icon" />}
           <span>{data.message}</span>
         </div>
       )}
-      <div className={cn("mission-node", data.active && "mission-node-active")}>
+      <div className={cn("mission-node", data.active && "mission-node-active", data.flashActive && "mission-node-flash", data.transitioning && "mission-node-transitioning")}>
         <div className="mission-node-head">
           <div className={cn("mission-node-icon", data.appearance === 'phone' && "mission-node-icon-phone", (data.appearance === 'robot' || data.appearance === 'robot-arm') && "mission-node-icon-robot")}><meta.icon size={16} /></div>
           <div>
@@ -974,10 +1273,18 @@ function MissionEdge(props: EdgeProps<Edge<DemoEdgeData>>) {
       : isDataPipe ? 3.7
       : 1.35;
   const opacity = isSelected ? 1 : isActive ? (isDataPipe ? 0.94 : 0.88) : kind === 'wireless' ? 0.72 : isDataPipe ? 0.82 : 0.66;
-  const className = isSelected ? "edge-selected edge-animated" : isActive ? "edge-active edge-animated" : "edge-idle";
+  const isTransitioning = Boolean(props.data?.transitioning);
+  const className = isSelected
+    ? "edge-selected edge-animated"
+    : isActive
+      ? "edge-active edge-animated"
+      : isTransitioning
+        ? "edge-transitioning"
+        : "edge-idle";
+  const edgeOpacity = isTransitioning && !isActive ? Math.max(0.24, opacity * 0.55) : opacity;
   return (
     <>
-      <BaseEdge path={path} className={className} style={{ stroke: color, strokeWidth, strokeDasharray: dash, strokeLinecap: 'round', transition: 'all 0.5s', opacity }} />
+      <BaseEdge path={path} className={className} style={{ stroke: color, strokeWidth, strokeDasharray: dash, strokeLinecap: 'round', transition: 'stroke 220ms ease, stroke-width 220ms ease, opacity 220ms ease, stroke-dashoffset 220ms ease', opacity: edgeOpacity }} />
       {note && (
         <foreignObject
           width={56}
@@ -1069,10 +1376,27 @@ const FAMILY_LAYOUT = (() => {
   };
 })();
 
-function buildGraph(_script: DemoScript, playback: PlaybackFrame) {
+function buildGraph(
+  _script: DemoScript,
+  playback: PlaybackFrame,
+  transitioningNodeIds: string[] = [],
+  transitioningEdgeIds: string[] = [],
+  transitioningBubbles: Record<string, RetainedBubble> = {},
+  transitioningPlans: Record<string, RetainedPlan> = {},
+) {
   const visibleSet = new Set(playback.visibleNodeIds);
   const activeNodeSet = new Set(playback.activeNodeIds);
   const activeEdgeSet = new Set(playback.activeEdgeIds);
+  const transitioningNodeSet = new Set(transitioningNodeIds);
+  const transitioningEdgeSet = new Set(transitioningEdgeIds);
+  const bubbleFor = (nodeId: string) => playback.bubbles[nodeId] ?? transitioningBubbles[nodeId]?.text;
+  const bubbleStateFor = (nodeId: string) => playback.bubbleStates[nodeId] ?? transitioningBubbles[nodeId]?.state;
+  const bubbleLeavingFor = (nodeId: string) => !playback.bubbles[nodeId] && Boolean(transitioningBubbles[nodeId]);
+  const planFor = (nodeId: string) => (
+    playback.planBubble?.nodeId === nodeId ? playback.planBubble : transitioningPlans[nodeId]
+  );
+  const planLeavingFor = (nodeId: string) => playback.planBubble?.nodeId !== nodeId && Boolean(transitioningPlans[nodeId]);
+  const flashFor = (nodeId: string) => Boolean(bubbleFor(nodeId) || planFor(nodeId));
   const busStops = {
     idm: `${((LAYOUT.nodes.idm.x + LAYOUT.nodes.idm.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
     acnAgent: `${((LAYOUT.nodes.acnAgent.x + LAYOUT.nodes.acnAgent.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
@@ -1090,54 +1414,54 @@ function buildGraph(_script: DemoScript, playback: PlaybackFrame) {
     { id: 'r-family', type: 'region', hidden: !visibleSet.has('r-family'), position: { x: FAMILY_LAYOUT.x, y: FAMILY_LAYOUT.y }, style: { width: FAMILY_LAYOUT.width, height: FAMILY_LAYOUT.height, zIndex: -1 }, data: { label: 'Family Domain', variant: 'family' }, draggable: false },
 
     // Core network control
-    { id: 'idm', type: 'mission', hidden: !visibleSet.has('idm'), position: { x: LAYOUT.nodes.idm.x, y: LAYOUT.nodes.idm.y }, style: { width: LAYOUT.nodes.idm.width }, data: { label: 'IDM', kind: 'idm', role: 'Identity Function', active: activeNodeSet.has('idm'), context: activeNodeSet.has('idm'), handles: ['in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('idm'), message: playback.bubbles.idm } },
-    { id: 'acn-agent', type: 'mission', hidden: !visibleSet.has('acn-agent'), position: { x: LAYOUT.nodes.acnAgent.x, y: LAYOUT.nodes.acnAgent.y }, style: { width: LAYOUT.nodes.acnAgent.width }, data: { label: 'ACN Agent', kind: 'agent', role: 'Agent / Policy Function', active: activeNodeSet.has('acn-agent'), emphasis: true, handles: ['in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('acn-agent'), message: playback.bubbles['acn-agent'], plan: playback.planBubble && playback.planBubble.nodeId === 'acn-agent' ? { title: playback.planBubble.title, items: playback.planBubble.items } : undefined } },
+    { id: 'idm', type: 'mission', hidden: !visibleSet.has('idm'), position: { x: LAYOUT.nodes.idm.x, y: LAYOUT.nodes.idm.y }, style: { width: LAYOUT.nodes.idm.width }, data: { label: 'IDM', kind: 'idm', role: 'Identity Function', active: activeNodeSet.has('idm'), flashActive: flashFor('idm'), transitioning: transitioningNodeSet.has('idm'), context: activeNodeSet.has('idm'), handles: ['in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('idm'), message: bubbleFor('idm'), messageState: bubbleStateFor('idm'), messageLeaving: bubbleLeavingFor('idm') } },
+    { id: 'acn-agent', type: 'mission', hidden: !visibleSet.has('acn-agent'), position: { x: LAYOUT.nodes.acnAgent.x, y: LAYOUT.nodes.acnAgent.y }, style: { width: LAYOUT.nodes.acnAgent.width }, data: { label: 'ACN Agent', kind: 'agent', role: 'Agent / Policy Function', active: activeNodeSet.has('acn-agent'), flashActive: flashFor('acn-agent'), transitioning: transitioningNodeSet.has('acn-agent'), emphasis: true, handles: ['in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('acn-agent'), message: bubbleFor('acn-agent'), messageState: bubbleStateFor('acn-agent'), messageLeaving: bubbleLeavingFor('acn-agent'), plan: planFor('acn-agent') ? { title: planFor('acn-agent')!.title, items: planFor('acn-agent')!.items } : undefined, planLeaving: planLeavingFor('acn-agent') } },
 
     // ABI backbone
     { id: 'bus-line', type: 'bus', hidden: !visibleSet.has('bus-line'), position: { x: LAYOUT.bus.x, y: LAYOUT.bus.y }, style: { width: LAYOUT.bus.width, height: LAYOUT.bus.height, zIndex: 0 }, data: { label: 'ABI', caption: 'Agent Based Interface', context: playback.phase === 'running', emphasis: playback.phase === 'running' || playback.phase === 'gate', ...busStops }, draggable: false },
 
     // Core network services and transport
-    { id: 'srf', type: 'mission', hidden: !visibleSet.has('srf'), position: { x: LAYOUT.nodes.srf.x, y: LAYOUT.nodes.srf.y }, style: { width: LAYOUT.nodes.srf.width }, data: { label: 'SRF', kind: 'srf', role: 'Service Routing Function', active: activeNodeSet.has('srf'), handles: ['in-top', 'in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('srf'), message: playback.bubbles.srf } },
-    { id: 'scf', type: 'mission', hidden: !visibleSet.has('scf'), position: { x: LAYOUT.nodes.scf.x, y: LAYOUT.nodes.scf.y }, style: { width: LAYOUT.nodes.scf.width }, data: { label: 'SCF', kind: 'scf', role: 'Service Control Function', active: activeNodeSet.has('scf'), context: activeNodeSet.has('scf'), handles: ['in-top'], processing: playback.phase === 'running' && activeNodeSet.has('scf'), message: playback.bubbles.scf } },
-    { id: 'up', type: 'mission', hidden: !visibleSet.has('up'), position: { x: LAYOUT.nodes.up.x, y: LAYOUT.nodes.up.y }, style: { width: LAYOUT.nodes.up.width, height: 64 }, data: { label: 'UP', kind: 'up', role: 'User Plane', active: activeNodeSet.has('up'), context: activeNodeSet.has('up'), handles: ['in-top', 'in-bottom', 'in-left', 'out-right'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('up'), message: playback.bubbles.up } },
-    { id: 'agent-gw', type: 'mission', hidden: !visibleSet.has('agent-gw'), position: { x: LAYOUT.nodes.cmccGw.x, y: LAYOUT.nodes.cmccGw.y }, style: { width: LAYOUT.nodes.cmccGw.width, height: 64 }, data: { label: 'Agent GW', kind: 'gw', role: 'CMCC Agent Gateway', active: activeNodeSet.has('agent-gw'), context: activeNodeSet.has('agent-gw'), handles: ['in-top', 'in-left', 'out-right-top', 'out-right-bottom'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('agent-gw'), message: playback.bubbles['agent-gw'] } },
-    { id: 'ran', type: 'mission', hidden: !visibleSet.has('ran'), position: { x: LAYOUT.nodes.ran.x, y: LAYOUT.nodes.ran.y }, style: { width: LAYOUT.nodes.ran.width }, data: { label: 'RAN', kind: 'access', role: 'Radio Access Network', active: activeNodeSet.has('ran'), handles: ['in-right', 'out-top-left', 'out-top-right', 'out-right-bottom'], appearance: 'pill', processing: playback.phase === 'running' && activeNodeSet.has('ran'), message: playback.bubbles.ran } },
+    { id: 'srf', type: 'mission', hidden: !visibleSet.has('srf'), position: { x: LAYOUT.nodes.srf.x, y: LAYOUT.nodes.srf.y }, style: { width: LAYOUT.nodes.srf.width }, data: { label: 'SRF', kind: 'srf', role: 'Service Routing Function', active: activeNodeSet.has('srf'), flashActive: flashFor('srf'), transitioning: transitioningNodeSet.has('srf'), handles: ['in-top', 'in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('srf'), message: bubbleFor('srf'), messageState: bubbleStateFor('srf'), messageLeaving: bubbleLeavingFor('srf') } },
+    { id: 'scf', type: 'mission', hidden: !visibleSet.has('scf'), position: { x: LAYOUT.nodes.scf.x, y: LAYOUT.nodes.scf.y }, style: { width: LAYOUT.nodes.scf.width }, data: { label: 'SCF', kind: 'scf', role: 'Service Control Function', active: activeNodeSet.has('scf'), flashActive: flashFor('scf'), transitioning: transitioningNodeSet.has('scf'), context: activeNodeSet.has('scf'), handles: ['in-top'], processing: playback.phase === 'running' && activeNodeSet.has('scf'), message: bubbleFor('scf'), messageState: bubbleStateFor('scf'), messageLeaving: bubbleLeavingFor('scf') } },
+    { id: 'up', type: 'mission', hidden: !visibleSet.has('up'), position: { x: LAYOUT.nodes.up.x, y: LAYOUT.nodes.up.y }, style: { width: LAYOUT.nodes.up.width, height: 64 }, data: { label: 'UP', kind: 'up', role: 'User Plane', active: activeNodeSet.has('up'), flashActive: flashFor('up'), transitioning: transitioningNodeSet.has('up'), context: activeNodeSet.has('up'), handles: ['in-top', 'in-bottom', 'in-left', 'out-right'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('up'), message: bubbleFor('up'), messageState: bubbleStateFor('up'), messageLeaving: bubbleLeavingFor('up') } },
+    { id: 'agent-gw', type: 'mission', hidden: !visibleSet.has('agent-gw'), position: { x: LAYOUT.nodes.cmccGw.x, y: LAYOUT.nodes.cmccGw.y }, style: { width: LAYOUT.nodes.cmccGw.width, height: 64 }, data: { label: 'Agent GW', kind: 'gw', role: 'CMCC Agent Gateway', active: activeNodeSet.has('agent-gw'), flashActive: flashFor('agent-gw'), transitioning: transitioningNodeSet.has('agent-gw'), context: activeNodeSet.has('agent-gw'), handles: ['in-top', 'in-left', 'out-right-top', 'out-right-bottom'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('agent-gw'), message: bubbleFor('agent-gw'), messageState: bubbleStateFor('agent-gw'), messageLeaving: bubbleLeavingFor('agent-gw') } },
+    { id: 'ran', type: 'mission', hidden: !visibleSet.has('ran'), position: { x: LAYOUT.nodes.ran.x, y: LAYOUT.nodes.ran.y }, style: { width: LAYOUT.nodes.ran.width }, data: { label: 'RAN', kind: 'access', role: 'Radio Access Network', active: activeNodeSet.has('ran'), flashActive: flashFor('ran'), transitioning: transitioningNodeSet.has('ran'), handles: ['in-right', 'out-top-left', 'out-top-right', 'out-right-bottom'], appearance: 'pill', processing: playback.phase === 'running' && activeNodeSet.has('ran'), message: bubbleFor('ran'), messageState: bubbleStateFor('ran'), messageLeaving: bubbleLeavingFor('ran') } },
 
     // Family domain
-    { id: 'phone', type: 'mission', hidden: !visibleSet.has('phone'), position: { x: LAYOUT.nodes.phone.x, y: LAYOUT.nodes.phone.y }, style: { width: LAYOUT.nodes.phone.width }, data: { label: 'Phone', kind: 'endpoint', active: activeNodeSet.has('phone'), handles: ['in-left', 'out-left'], appearance: 'phone', processing: playback.phase === 'running' && activeNodeSet.has('phone'), message: playback.bubbles.phone } },
-    { id: 'robot-dog', type: 'mission', hidden: !visibleSet.has('robot-dog'), position: { x: LAYOUT.nodes.robotDog.x, y: LAYOUT.nodes.robotDog.y }, style: { width: LAYOUT.nodes.robotDog.width }, data: { label: 'Robot Dog', kind: 'robot', active: activeNodeSet.has('robot-dog'), handles: ['in-left', 'out-left'], appearance: 'robot', processing: playback.phase === 'running' && activeNodeSet.has('robot-dog'), message: playback.bubbles['robot-dog'] } },
+    { id: 'phone', type: 'mission', hidden: !visibleSet.has('phone'), position: { x: LAYOUT.nodes.phone.x, y: LAYOUT.nodes.phone.y }, style: { width: LAYOUT.nodes.phone.width }, data: { label: 'Phone', kind: 'endpoint', active: activeNodeSet.has('phone'), flashActive: flashFor('phone'), transitioning: transitioningNodeSet.has('phone'), handles: ['in-left', 'out-left'], appearance: 'phone', processing: playback.phase === 'running' && activeNodeSet.has('phone'), message: bubbleFor('phone'), messageState: bubbleStateFor('phone'), messageLeaving: bubbleLeavingFor('phone') } },
+    { id: 'robot-dog', type: 'mission', hidden: !visibleSet.has('robot-dog'), position: { x: LAYOUT.nodes.robotDog.x, y: LAYOUT.nodes.robotDog.y }, style: { width: LAYOUT.nodes.robotDog.width }, data: { label: 'Robot Dog', kind: 'robot', active: activeNodeSet.has('robot-dog'), flashActive: flashFor('robot-dog'), transitioning: transitioningNodeSet.has('robot-dog'), handles: ['in-left', 'out-left'], appearance: 'robot', processing: playback.phase === 'running' && activeNodeSet.has('robot-dog'), message: bubbleFor('robot-dog'), messageState: bubbleStateFor('robot-dog'), messageLeaving: bubbleLeavingFor('robot-dog') } },
 
     // External Boxes Components
-    { id: 'ott-ordering', type: 'mission', hidden: !visibleSet.has('ott-ordering'), position: { x: LAYOUT.nodes.ottOrdering.x, y: LAYOUT.nodes.ottOrdering.y }, style: { width: LAYOUT.nodes.ottOrdering.width }, data: { label: 'Ordering Agent', kind: 'agent', role: 'OTT Application Agent', active: activeNodeSet.has('ott-ordering'), context: activeNodeSet.has('ott-ordering'), handles: ['in-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('ott-ordering'), message: playback.bubbles['ott-ordering'], plan: playback.planBubble && playback.planBubble.nodeId === 'ott-ordering' ? { title: playback.planBubble.title, items: playback.planBubble.items } : undefined } },
-    { id: 'ott-gw', type: 'mission', hidden: !visibleSet.has('ott-gw'), position: { x: LAYOUT.nodes.ottGw.x, y: LAYOUT.nodes.ottGw.y }, style: { width: LAYOUT.nodes.ottGw.width }, data: { label: 'Agent GW', kind: 'gw', role: 'OTT Agent Gateway', active: activeNodeSet.has('ott-gw'), context: activeNodeSet.has('ott-gw'), handles: ['in-left', 'out-right', 'out-bottom'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('ott-gw'), message: playback.bubbles['ott-gw'] } },
-    { id: 'mno-gw', type: 'mission', hidden: !visibleSet.has('mno-gw'), position: { x: LAYOUT.nodes.mnoGw.x, y: LAYOUT.nodes.mnoGw.y }, style: { width: LAYOUT.nodes.mnoGw.width }, data: { label: 'Agent GW', kind: 'gw', role: 'MNO B Agent Gateway', active: activeNodeSet.has('mno-gw'), context: activeNodeSet.has('mno-gw'), handles: ['in-top', 'in-left', 'out-bottom'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('mno-gw'), message: playback.bubbles['mno-gw'] } },
-    { id: 'mno-endpoint', type: 'mission', hidden: !visibleSet.has('mno-endpoint'), position: { x: LAYOUT.nodes.mnoEndpoint.x, y: LAYOUT.nodes.mnoEndpoint.y }, style: { width: LAYOUT.nodes.mnoEndpoint.width }, data: { label: 'Robot Arm', kind: 'arm', active: activeNodeSet.has('mno-endpoint'), handles: ['in-left'], appearance: 'robot-arm', processing: playback.phase === 'running' && activeNodeSet.has('mno-endpoint'), message: playback.bubbles['mno-endpoint'], plan: playback.planBubble && playback.planBubble.nodeId === 'mno-endpoint' ? { title: playback.planBubble.title, items: playback.planBubble.items } : undefined } },
+    { id: 'ott-ordering', type: 'mission', hidden: !visibleSet.has('ott-ordering'), position: { x: LAYOUT.nodes.ottOrdering.x, y: LAYOUT.nodes.ottOrdering.y }, style: { width: LAYOUT.nodes.ottOrdering.width }, data: { label: 'Ordering Agent', kind: 'agent', role: 'OTT Application Agent', active: activeNodeSet.has('ott-ordering'), flashActive: flashFor('ott-ordering'), transitioning: transitioningNodeSet.has('ott-ordering'), context: activeNodeSet.has('ott-ordering'), handles: ['in-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('ott-ordering'), message: bubbleFor('ott-ordering'), messageState: bubbleStateFor('ott-ordering'), messageLeaving: bubbleLeavingFor('ott-ordering'), plan: planFor('ott-ordering') ? { title: planFor('ott-ordering')!.title, items: planFor('ott-ordering')!.items } : undefined, planLeaving: planLeavingFor('ott-ordering') } },
+    { id: 'ott-gw', type: 'mission', hidden: !visibleSet.has('ott-gw'), position: { x: LAYOUT.nodes.ottGw.x, y: LAYOUT.nodes.ottGw.y }, style: { width: LAYOUT.nodes.ottGw.width }, data: { label: 'Agent GW', kind: 'gw', role: 'OTT Agent Gateway', active: activeNodeSet.has('ott-gw'), flashActive: flashFor('ott-gw'), transitioning: transitioningNodeSet.has('ott-gw'), context: activeNodeSet.has('ott-gw'), handles: ['in-left', 'out-right', 'out-bottom'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('ott-gw'), message: bubbleFor('ott-gw'), messageState: bubbleStateFor('ott-gw'), messageLeaving: bubbleLeavingFor('ott-gw') } },
+    { id: 'mno-gw', type: 'mission', hidden: !visibleSet.has('mno-gw'), position: { x: LAYOUT.nodes.mnoGw.x, y: LAYOUT.nodes.mnoGw.y }, style: { width: LAYOUT.nodes.mnoGw.width }, data: { label: 'Agent GW', kind: 'gw', role: 'MNO B Agent Gateway', active: activeNodeSet.has('mno-gw'), flashActive: flashFor('mno-gw'), transitioning: transitioningNodeSet.has('mno-gw'), context: activeNodeSet.has('mno-gw'), handles: ['in-top', 'in-left', 'out-bottom'], appearance: 'gateway', processing: playback.phase === 'running' && activeNodeSet.has('mno-gw'), message: bubbleFor('mno-gw'), messageState: bubbleStateFor('mno-gw'), messageLeaving: bubbleLeavingFor('mno-gw') } },
+    { id: 'mno-endpoint', type: 'mission', hidden: !visibleSet.has('mno-endpoint'), position: { x: LAYOUT.nodes.mnoEndpoint.x, y: LAYOUT.nodes.mnoEndpoint.y }, style: { width: LAYOUT.nodes.mnoEndpoint.width }, data: { label: 'Robot Arm', kind: 'arm', active: activeNodeSet.has('mno-endpoint'), flashActive: flashFor('mno-endpoint'), transitioning: transitioningNodeSet.has('mno-endpoint'), handles: ['in-left'], appearance: 'robot-arm', processing: playback.phase === 'running' && activeNodeSet.has('mno-endpoint'), message: bubbleFor('mno-endpoint'), messageState: bubbleStateFor('mno-endpoint'), messageLeaving: bubbleLeavingFor('mno-endpoint'), plan: planFor('mno-endpoint') ? { title: planFor('mno-endpoint')!.title, items: planFor('mno-endpoint')!.items } : undefined, planLeaving: planLeavingFor('mno-endpoint') } },
   ];
 
   const edges: Edge[] = [
     // Vertical drops from Row 1 to Bus (Specific target handles)
-    { id: 'e-idm-bus', source: 'bus-line', sourceHandle: 'h-b-idm', target: 'idm', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('idm') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-idm-bus') ? 'selected' : 'idle' } },
-    { id: 'e-agent-bus', source: 'bus-line', sourceHandle: 'h-b-agent', target: 'acn-agent', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('acn-agent') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-agent-bus') ? 'selected' : 'idle' } },
+    { id: 'e-idm-bus', source: 'bus-line', sourceHandle: 'h-b-idm', target: 'idm', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('idm') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-idm-bus') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-idm-bus') } },
+    { id: 'e-agent-bus', source: 'bus-line', sourceHandle: 'h-b-agent', target: 'acn-agent', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('acn-agent') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-agent-bus') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-agent-bus') } },
 
     // Backbone drops
-    { id: 'e-bus-srf', source: 'srf', sourceHandle: 'out-bottom', target: 'bus-line', targetHandle: 'h-t-srf', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('srf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-srf') ? 'selected' : 'idle' } },
-    { id: 'e-bus-scf', source: 'bus-line', sourceHandle: 'h-b-scf', target: 'scf', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('scf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-scf') ? 'selected' : 'idle' } },
-    { id: 'e-bus-up', source: 'bus-line', sourceHandle: 'h-b-up', target: 'up', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('up'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-up') ? 'selected' : 'idle' } },
-    { id: 'e-bus-cmcc-gw', source: 'bus-line', sourceHandle: 'h-b-gw', target: 'agent-gw', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('agent-gw'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-cmcc-gw') ? 'selected' : 'idle' } },
+    { id: 'e-bus-srf', source: 'srf', sourceHandle: 'out-bottom', target: 'bus-line', targetHandle: 'h-t-srf', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('srf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-srf') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-srf') } },
+    { id: 'e-bus-scf', source: 'bus-line', sourceHandle: 'h-b-scf', target: 'scf', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('scf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-scf') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-scf') } },
+    { id: 'e-bus-up', source: 'bus-line', sourceHandle: 'h-b-up', target: 'up', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('up'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-up') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-up') } },
+    { id: 'e-bus-cmcc-gw', source: 'bus-line', sourceHandle: 'h-b-gw', target: 'agent-gw', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('agent-gw'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-cmcc-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-cmcc-gw') } },
 
     // Internal service and transport
-    { id: 'e-srf-ran', source: 'ran', sourceHandle: 'out-top-left', target: 'srf', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('srf') || !visibleSet.has('ran'), data: { kind: 'logic', state: activeEdgeSet.has('e-srf-ran') ? 'selected' : 'idle', note: 'control' } },
-    { id: 'e-up-ran', source: 'ran', sourceHandle: 'out-top-right', target: 'up', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('up') || !visibleSet.has('ran'), data: { kind: 'baseline', state: activeEdgeSet.has('e-up-ran') ? 'selected' : 'idle', note: 'data' } },
-    { id: 'e-up-gw', source: 'up', sourceHandle: 'out-right', target: 'agent-gw', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('up') || !visibleSet.has('agent-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-up-gw') ? 'selected' : 'idle' } },
-    { id: 'e-ran-phone', source: 'phone', sourceHandle: 'out-left', target: 'ran', targetHandle: 'in-right', type: 'mission', hidden: !visibleSet.has('ran') || !visibleSet.has('phone'), data: { kind: 'wireless', state: activeEdgeSet.has('e-ran-phone') ? 'selected' : 'idle' } },
-    { id: 'e-ran-dog', source: 'robot-dog', sourceHandle: 'out-left', target: 'ran', targetHandle: 'in-right', type: 'mission', hidden: !visibleSet.has('ran') || !visibleSet.has('robot-dog'), data: { kind: 'wireless', state: activeEdgeSet.has('e-ran-dog') ? 'selected' : 'idle' } },
+    { id: 'e-srf-ran', source: 'ran', sourceHandle: 'out-top-left', target: 'srf', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('srf') || !visibleSet.has('ran'), data: { kind: 'logic', state: activeEdgeSet.has('e-srf-ran') ? 'selected' : 'idle', note: 'control', transitioning: transitioningEdgeSet.has('e-srf-ran') } },
+    { id: 'e-up-ran', source: 'ran', sourceHandle: 'out-top-right', target: 'up', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('up') || !visibleSet.has('ran'), data: { kind: 'baseline', state: activeEdgeSet.has('e-up-ran') ? 'selected' : 'idle', note: 'data', transitioning: transitioningEdgeSet.has('e-up-ran') } },
+    { id: 'e-up-gw', source: 'up', sourceHandle: 'out-right', target: 'agent-gw', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('up') || !visibleSet.has('agent-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-up-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-up-gw') } },
+    { id: 'e-ran-phone', source: 'phone', sourceHandle: 'out-left', target: 'ran', targetHandle: 'in-right', type: 'mission', hidden: !visibleSet.has('ran') || !visibleSet.has('phone'), data: { kind: 'wireless', state: activeEdgeSet.has('e-ran-phone') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-ran-phone') } },
+    { id: 'e-ran-dog', source: 'robot-dog', sourceHandle: 'out-left', target: 'ran', targetHandle: 'in-right', type: 'mission', hidden: !visibleSet.has('ran') || !visibleSet.has('robot-dog'), data: { kind: 'wireless', state: activeEdgeSet.has('e-ran-dog') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-ran-dog') } },
 
     // Cross-domain
-    { id: 'e-cmcc-ott-gw', source: 'agent-gw', sourceHandle: 'out-right-top', target: 'ott-gw', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('agent-gw') || !visibleSet.has('ott-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-cmcc-ott-gw') ? 'selected' : 'idle' } },
-    { id: 'e-cmcc-mno-gw', source: 'agent-gw', sourceHandle: 'out-right-bottom', target: 'mno-gw', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('agent-gw') || !visibleSet.has('mno-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-cmcc-mno-gw') ? 'selected' : 'idle' } },
-    { id: 'e-ott-gw-ordering', source: 'ott-gw', sourceHandle: 'out-right', target: 'ott-ordering', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('ott-gw') || !visibleSet.has('ott-ordering'), data: { kind: 'baseline', state: activeEdgeSet.has('e-ott-gw-ordering') ? 'selected' : 'idle' } },
-    { id: 'e-ott-gw-mno-gw', source: 'ott-gw', sourceHandle: 'out-bottom', target: 'mno-gw', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('ott-gw') || !visibleSet.has('mno-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-ott-gw-mno-gw') ? 'selected' : 'idle' } },
-    { id: 'e-mno-gw-endpoint', source: 'mno-gw', sourceHandle: 'out-bottom', target: 'mno-endpoint', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('mno-gw') || !visibleSet.has('mno-endpoint'), data: { kind: 'baseline', state: activeEdgeSet.has('e-mno-gw-endpoint') ? 'selected' : 'idle' } },
+    { id: 'e-cmcc-ott-gw', source: 'agent-gw', sourceHandle: 'out-right-top', target: 'ott-gw', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('agent-gw') || !visibleSet.has('ott-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-cmcc-ott-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-cmcc-ott-gw') } },
+    { id: 'e-cmcc-mno-gw', source: 'agent-gw', sourceHandle: 'out-right-bottom', target: 'mno-gw', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('agent-gw') || !visibleSet.has('mno-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-cmcc-mno-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-cmcc-mno-gw') } },
+    { id: 'e-ott-gw-ordering', source: 'ott-gw', sourceHandle: 'out-right', target: 'ott-ordering', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('ott-gw') || !visibleSet.has('ott-ordering'), data: { kind: 'baseline', state: activeEdgeSet.has('e-ott-gw-ordering') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-ott-gw-ordering') } },
+    { id: 'e-ott-gw-mno-gw', source: 'ott-gw', sourceHandle: 'out-bottom', target: 'mno-gw', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('ott-gw') || !visibleSet.has('mno-gw'), data: { kind: 'baseline', state: activeEdgeSet.has('e-ott-gw-mno-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-ott-gw-mno-gw') } },
+    { id: 'e-mno-gw-endpoint', source: 'mno-gw', sourceHandle: 'out-bottom', target: 'mno-endpoint', targetHandle: 'in-left', type: 'mission', hidden: !visibleSet.has('mno-gw') || !visibleSet.has('mno-endpoint'), data: { kind: 'baseline', state: activeEdgeSet.has('e-mno-gw-endpoint') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-mno-gw-endpoint') } },
   ];
 
 
