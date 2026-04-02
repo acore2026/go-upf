@@ -3,7 +3,7 @@ import {
   Repeat, Cpu, Play, Radio, Router, Smartphone, Square, Network,
   UserCheck, Settings, Settings2, Database, Waypoints, Globe, Lock, Unlock, Sparkles, Bot, Wrench, LoaderCircle, BrainCircuit, CheckCircle2
 } from 'lucide-react';
-import { Background, BaseEdge, Handle, Position, ReactFlow, ReactFlowProvider, getBezierPath, getStraightPath, applyNodeChanges, applyEdgeChanges, type Edge, type EdgeProps, type Node, type NodeProps, type NodeTypes, type OnNodesChange, type OnEdgesChange } from '@xyflow/react';
+import { Background, BaseEdge, Handle, Position, ReactFlow, ReactFlowProvider, getBezierPath, applyNodeChanges, applyEdgeChanges, type Edge, type EdgeProps, type Node, type NodeProps, type NodeTypes, type OnNodesChange, type OnEdgesChange } from '@xyflow/react';
 import { load as loadYaml } from 'js-yaml';
 import '@xyflow/react/dist/style.css';
 import { cn } from './utils';
@@ -33,7 +33,7 @@ type DemoNodeData = {
 };
 type DemoEdgeData = { kind: LinkKind; state: 'idle'|'active'|'selected'; note?: string; tone?: string; transitioning?: boolean; };
 type RegionNodeData = { label: string; variant?: 'domain' | 'subdomain' | 'family' | 'external'; };
-type BusNodeData = { label: string; caption: string; idm: string; acnAgent: string; srf: string; scf: string; up: string; cmccGw: string; context?: boolean; emphasis?: boolean; };
+type BusNodeData = { label: string; caption: string; context?: boolean; emphasis?: boolean; };
 type ScriptBubble = { node: string; text: string };
 type ScriptAction = {
   id: string;
@@ -1238,25 +1238,23 @@ function MissionNode({ data }: NodeProps<Node<DemoNodeData>>) {
 
 function MissionEdge(props: EdgeProps<Edge<DemoEdgeData>>) {
   const { kind = 'baseline', state = 'idle', note, tone } = props.data || {};
-  const [path, labelX, labelY] = kind === 'bus'
-    ? getStraightPath(props)
-    : getBezierPath({
-        ...props,
-        curvature: kind === 'wireless' ? 0.2 : 0.16,
-      });
+  const [path, labelX, labelY] = getBezierPath({
+    ...props,
+    curvature: kind === 'wireless' ? 0.2 : kind === 'bus' ? 0.2 : 0.16,
+  });
   const isSelected = state === 'selected';
   const isActive = state === 'active' || isSelected;
   const isRanSrf = props.id === 'e-srf-ran';
   const isDataPipe = props.id === 'e-up-ran' || props.id === 'e-up-gw';
   const activeColor = tone ?? (
-    kind === 'bus' ? '#5b6cff'
+    kind === 'bus' ? '#38bdf8'
     : kind === 'logic' ? '#ec4899'
     : kind === 'wireless' ? '#0284c7'
     : isRanSrf ? '#64748b'
     : '#10b981'
   );
   const color = state === 'idle'
-    ? kind === 'bus' ? '#7c8cff'
+    ? kind === 'bus' ? '#8db7d3'
     : isDataPipe ? '#94a3b8'
     : kind === 'wireless' ? '#7dd3fc'
     : isRanSrf ? '#94a3b8'
@@ -1268,9 +1266,11 @@ function MissionEdge(props: EdgeProps<Edge<DemoEdgeData>>) {
     : 3.05
     : isActive
       ? isDataPipe ? 4.35
+      : kind === 'bus' ? 1.8
       : 1.9
       : kind === 'wireless' ? 1.8
       : isDataPipe ? 3.7
+      : kind === 'bus' ? 1.45
       : 1.35;
   const opacity = isSelected ? 1 : isActive ? (isDataPipe ? 0.94 : 0.88) : kind === 'wireless' ? 0.72 : isDataPipe ? 0.82 : 0.66;
   const isTransitioning = Boolean(props.data?.transitioning);
@@ -1313,23 +1313,18 @@ function RegionNode({ data }: NodeProps<Node<RegionNodeData>>) {
 function BusNode({ data }: NodeProps<Node<BusNodeData>>) {
   return (
     <div className={cn("bus-node-shell", data.context && "bus-node-context", data.emphasis && "bus-node-emphasis")}>
-      <div className="bus-node-header">
-        <span className="bus-node-pill">
-          <Sparkles size={14} />
-          {data.label}
-        </span>
-        <span className="bus-node-caption">{data.caption}</span>
-      </div>
       <div className="bus-backbone">
+        <div className="bus-backbone-copy">
+          <span className="bus-node-pill">
+            <Sparkles size={13} />
+            {data.label}
+          </span>
+          <span className="bus-node-caption">{data.caption}</span>
+        </div>
       </div>
-
-      <Handle type="source" position={Position.Top} id="h-b-idm" style={{ left: data.idm, top: 24, background: 'transparent', border: 'none', opacity: 0 }} />
-      <Handle type="source" position={Position.Top} id="h-b-agent" style={{ left: data.acnAgent, top: 24, background: 'transparent', border: 'none', opacity: 0 }} />
-      <Handle type="target" position={Position.Bottom} id="h-t-srf" style={{ left: data.srf, bottom: 10, background: 'transparent', border: 'none', opacity: 0 }} />
-
-      <Handle type="source" position={Position.Bottom} id="h-b-scf" style={{ left: data.scf, bottom: 10, background: 'transparent', border: 'none', opacity: 0 }} />
-      <Handle type="source" position={Position.Bottom} id="h-b-up" style={{ left: data.up, bottom: 10, background: 'transparent', border: 'none', opacity: 0 }} />
-      <Handle type="source" position={Position.Bottom} id="h-b-gw" style={{ left: data.cmccGw, bottom: 10, background: 'transparent', border: 'none', opacity: 0 }} />
+      <Handle type="source" position={Position.Top} id="abi-top" style={{ left: '50%', top: 0, background: 'transparent', border: 'none', opacity: 0 }} />
+      <Handle type="target" position={Position.Bottom} id="abi-bottom-in" style={{ left: '50%', bottom: 0, background: 'transparent', border: 'none', opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} id="abi-bottom-out" style={{ left: '50%', bottom: 0, background: 'transparent', border: 'none', opacity: 0 }} />
     </div>
   );
 }
@@ -1341,7 +1336,7 @@ const LAYOUT = {
   mno: { x: 980, y: 356, width: 326, height: 244 },
   core: { x: 36, y: 36, width: 860, height: 420 },
   access: { x: 36, y: 492, width: 760, height: 232 },
-  bus: { x: 156, y: 212, width: 620, height: 42 },
+  bus: { x: 212, y: 216, width: 508, height: 24 },
   nodes: {
     idm: { x: 182, y: 116, width: 136 },
     acnAgent: { x: 614, y: 116, width: 136 },
@@ -1397,15 +1392,6 @@ function buildGraph(
   );
   const planLeavingFor = (nodeId: string) => playback.planBubble?.nodeId !== nodeId && Boolean(transitioningPlans[nodeId]);
   const flashFor = (nodeId: string) => Boolean(bubbleFor(nodeId) || planFor(nodeId));
-  const busStops = {
-    idm: `${((LAYOUT.nodes.idm.x + LAYOUT.nodes.idm.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
-    acnAgent: `${((LAYOUT.nodes.acnAgent.x + LAYOUT.nodes.acnAgent.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
-    srf: `${((LAYOUT.nodes.srf.x + LAYOUT.nodes.srf.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
-    scf: `${((LAYOUT.nodes.scf.x + LAYOUT.nodes.scf.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
-    up: `${((LAYOUT.nodes.up.x + LAYOUT.nodes.up.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
-    cmccGw: `${((LAYOUT.nodes.cmccGw.x + LAYOUT.nodes.cmccGw.width / 2 - LAYOUT.bus.x) / LAYOUT.bus.width) * 100}%`,
-  };
-
   const nodes: Node[] = [
     // Main Boxes
     { id: 'r-ott', type: 'region', hidden: !visibleSet.has('r-ott'), position: { x: LAYOUT.ott.x, y: LAYOUT.ott.y }, style: { width: LAYOUT.ott.width, height: LAYOUT.ott.height, zIndex: -1 }, data: { label: 'OTT', variant: 'external' }, draggable: false },
@@ -1418,7 +1404,7 @@ function buildGraph(
     { id: 'acn-agent', type: 'mission', hidden: !visibleSet.has('acn-agent'), position: { x: LAYOUT.nodes.acnAgent.x, y: LAYOUT.nodes.acnAgent.y }, style: { width: LAYOUT.nodes.acnAgent.width }, data: { label: 'ACN Agent', kind: 'agent', role: 'Agent / Policy Function', active: activeNodeSet.has('acn-agent'), flashActive: flashFor('acn-agent'), transitioning: transitioningNodeSet.has('acn-agent'), emphasis: true, handles: ['in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('acn-agent'), message: bubbleFor('acn-agent'), messageState: bubbleStateFor('acn-agent'), messageLeaving: bubbleLeavingFor('acn-agent'), plan: planFor('acn-agent') ? { title: planFor('acn-agent')!.title, items: planFor('acn-agent')!.items } : undefined, planLeaving: planLeavingFor('acn-agent') } },
 
     // ABI backbone
-    { id: 'bus-line', type: 'bus', hidden: !visibleSet.has('bus-line'), position: { x: LAYOUT.bus.x, y: LAYOUT.bus.y }, style: { width: LAYOUT.bus.width, height: LAYOUT.bus.height, zIndex: 0 }, data: { label: 'ABI', caption: 'Agent Based Interface', context: playback.phase === 'running', emphasis: playback.phase === 'running' || playback.phase === 'gate', ...busStops }, draggable: false },
+    { id: 'bus-line', type: 'bus', hidden: !visibleSet.has('bus-line'), position: { x: LAYOUT.bus.x, y: LAYOUT.bus.y }, style: { width: LAYOUT.bus.width, height: LAYOUT.bus.height, zIndex: 0 }, data: { label: 'ABI', caption: 'Agent Based Interface', context: playback.phase === 'running', emphasis: playback.phase === 'running' || playback.phase === 'gate' }, draggable: false },
 
     // Core network services and transport
     { id: 'srf', type: 'mission', hidden: !visibleSet.has('srf'), position: { x: LAYOUT.nodes.srf.x, y: LAYOUT.nodes.srf.y }, style: { width: LAYOUT.nodes.srf.width }, data: { label: 'SRF', kind: 'srf', role: 'Service Routing Function', active: activeNodeSet.has('srf'), flashActive: flashFor('srf'), transitioning: transitioningNodeSet.has('srf'), handles: ['in-top', 'in-bottom', 'out-bottom'], processing: playback.phase === 'running' && activeNodeSet.has('srf'), message: bubbleFor('srf'), messageState: bubbleStateFor('srf'), messageLeaving: bubbleLeavingFor('srf') } },
@@ -1440,14 +1426,14 @@ function buildGraph(
 
   const edges: Edge[] = [
     // Vertical drops from Row 1 to Bus (Specific target handles)
-    { id: 'e-idm-bus', source: 'bus-line', sourceHandle: 'h-b-idm', target: 'idm', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('idm') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-idm-bus') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-idm-bus') } },
-    { id: 'e-agent-bus', source: 'bus-line', sourceHandle: 'h-b-agent', target: 'acn-agent', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('acn-agent') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-agent-bus') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-agent-bus') } },
+    { id: 'e-idm-bus', source: 'bus-line', sourceHandle: 'abi-top', target: 'idm', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('idm') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-idm-bus') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-idm-bus') } },
+    { id: 'e-agent-bus', source: 'bus-line', sourceHandle: 'abi-top', target: 'acn-agent', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('acn-agent') || !visibleSet.has('bus-line'), data: { kind: 'bus', state: activeEdgeSet.has('e-agent-bus') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-agent-bus') } },
 
     // Backbone drops
-    { id: 'e-bus-srf', source: 'srf', sourceHandle: 'out-bottom', target: 'bus-line', targetHandle: 'h-t-srf', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('srf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-srf') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-srf') } },
-    { id: 'e-bus-scf', source: 'bus-line', sourceHandle: 'h-b-scf', target: 'scf', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('scf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-scf') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-scf') } },
-    { id: 'e-bus-up', source: 'bus-line', sourceHandle: 'h-b-up', target: 'up', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('up'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-up') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-up') } },
-    { id: 'e-bus-cmcc-gw', source: 'bus-line', sourceHandle: 'h-b-gw', target: 'agent-gw', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('agent-gw'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-cmcc-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-cmcc-gw') } },
+    { id: 'e-bus-srf', source: 'bus-line', sourceHandle: 'abi-bottom-out', target: 'srf', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('srf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-srf') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-srf') } },
+    { id: 'e-bus-scf', source: 'bus-line', sourceHandle: 'abi-bottom-out', target: 'scf', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('scf'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-scf') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-scf') } },
+    { id: 'e-bus-up', source: 'bus-line', sourceHandle: 'abi-bottom-out', target: 'up', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('up'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-up') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-up') } },
+    { id: 'e-bus-cmcc-gw', source: 'bus-line', sourceHandle: 'abi-bottom-out', target: 'agent-gw', targetHandle: 'in-top', type: 'mission', hidden: !visibleSet.has('bus-line') || !visibleSet.has('agent-gw'), data: { kind: 'bus', state: activeEdgeSet.has('e-bus-cmcc-gw') ? 'selected' : 'idle', transitioning: transitioningEdgeSet.has('e-bus-cmcc-gw') } },
 
     // Internal service and transport
     { id: 'e-srf-ran', source: 'ran', sourceHandle: 'out-top-left', target: 'srf', targetHandle: 'in-bottom', type: 'mission', hidden: !visibleSet.has('srf') || !visibleSet.has('ran'), data: { kind: 'logic', state: activeEdgeSet.has('e-srf-ran') ? 'selected' : 'idle', note: 'control', transitioning: transitioningEdgeSet.has('e-srf-ran') } },
