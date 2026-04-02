@@ -229,7 +229,9 @@ body {
   min-width: 118px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.92));
   border-radius: 11px;
-  padding: 10px 11px;
+  padding: 12px 12px;
+  position: relative;
+  overflow: hidden;
 }
 
 .mission-node-active {
@@ -244,6 +246,47 @@ body {
 .mission-node-emphasis {
   border-color: var(--node-tint);
   animation: pulse-glow 2s infinite;
+}
+
+.mission-node-gateway-shell {
+  border-radius: 14px;
+}
+
+.mission-node-gateway-shell .mission-node {
+  border-radius: 13px;
+  padding: 14px 14px;
+}
+
+.mission-node-phone-shell {
+  border-radius: 14px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+}
+
+.mission-node-phone-shell .mission-node {
+  border-radius: 13px;
+  padding: 10px 10px;
+}
+
+.mission-node-phone-shell .mission-node-icon {
+  width: 22px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.mission-node-robot-shell {
+  background: linear-gradient(180deg, rgba(245, 251, 252, 0.96), rgba(248, 250, 252, 0.96));
+  border-color: rgba(15, 118, 110, 0.12);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+}
+
+.mission-node-robot-shell .mission-node {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 252, 251, 0.94));
+  padding: 10px 10px;
+}
+
+.mission-node-icon-robot {
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(255, 255, 255, 0.92));
 }
 
 @keyframes pulse-glow {
@@ -267,6 +310,20 @@ body {
 
 .edge-idle {
   filter: none;
+}
+
+.mission-node-online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+}
+
+.mission-node-online-dot-inline {
+  width: 5px;
+  height: 5px;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.1);
 }
 
 .mission-node-head {
@@ -293,15 +350,21 @@ body {
   line-height: 1.05;
 }
 
+.mission-node-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .mission-node-role {
-  font-size: 0.58rem;
+  font-size: 0.6rem;
   font-weight: 700;
   color: var(--color-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
   line-height: 1.15;
-  margin-top: 2px;
-  max-width: 132px;
+  max-width: 160px;
 }
 
 /* Minified Round Router Node */
@@ -331,6 +394,23 @@ body {
   display: none;
 }
 
+.mission-node-phone-shell .mission-node-head,
+.mission-node-robot-shell .mission-node-head {
+  justify-content: center;
+  gap: 8px;
+}
+
+.mission-node-phone-shell .mission-node-label,
+.mission-node-robot-shell .mission-node-label {
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.mission-node-phone-shell .mission-node-meta,
+.mission-node-robot-shell .mission-node-meta {
+  display: none;
+}
+
 /* Region Nodes */
 .region-node {
   width: 100%;
@@ -350,6 +430,18 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.14em;
   pointer-events: none;
+}
+
+.region-node-subdomain {
+  border-radius: 24px;
+  border-style: dashed;
+  border-color: rgba(148, 163, 184, 0.32);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(248, 250, 252, 0.3));
+  padding: 12px 16px;
+  color: #475569;
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
 }
 
 /* Timeline */
@@ -434,12 +526,14 @@ body {
 
 /* React Flow Handles */
 .mission-handle {
-  width: 6px;
-  height: 6px;
-  background: color-mix(in srgb, white 72%, var(--node-tint) 28%);
-  border: 1.5px solid color-mix(in srgb, var(--node-tint) 70%, white);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.78);
-  transition: all 0.2s;
+  width: 4px;
+  height: 4px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  opacity: 0 !important;
+  transition: none;
+  pointer-events: none;
   z-index: 10;
 }
 
@@ -448,8 +542,8 @@ body {
 .mission-handle-n9-in, .mission-handle-n9-out { border-color: var(--color-blue); }
 
 .react-flow__handle:hover {
-  transform: scale(1.18);
-  background: var(--node-tint);
+  transform: none;
+  background: transparent;
 }
 
 .handle-label {
@@ -562,33 +656,6 @@ body {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent);
   opacity: 0.48;
   filter: blur(5px);
-}
-
-.bus-stop {
-  position: absolute;
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: white;
-  border: 3px solid #60a5fa;
-  transform: translate(-50%, -50%);
-  box-shadow:
-    0 0 0 4px rgba(255, 255, 255, 0.34),
-    0 0 10px rgba(34, 211, 238, 0.18),
-    0 0 16px rgba(99, 102, 241, 0.12);
-}
-
-.bus-stop-left {
-  left: 18%;
-}
-
-.bus-stop-mid {
-  left: 50%;
-}
-
-.bus-stop-right {
-  left: 82%;
 }
 
 @keyframes bus-flow {
