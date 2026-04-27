@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Repeat, Cpu, Play, Radio, Router, Smartphone, Square, Clock, BarChart3, Network } from 'lucide-react';
+import { Repeat, Cpu, Play, Radio, Router, Smartphone, Square, Clock, BarChart3, Network, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Background, BaseEdge, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, getBezierPath, type Edge, type EdgeProps, type Node, type NodeProps, type NodeTypes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { cn, formatBitrate, formatBytes } from './utils';
@@ -57,6 +57,7 @@ export default function App() { return ( <ReactFlowProvider><Dashboard /></React
 function Dashboard() {
   const [missionState, setMissionState] = useState<'idle'|'running'|'complete'|'stopped'>('idle');
   const [stage, setStage] = useState<DemoStage>('idle');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
     if (missionState !== 'running') return;
@@ -83,17 +84,30 @@ function Dashboard() {
         <div className="header-left"><Network className="text-blue-500" size={24} /><h1 className="dashboard-title">Dual-UPF Adaptive QoS Demo</h1><div className="control-group ml-10"><StatusBadge label={missionState === 'running' ? 'Live Mission' : missionState === 'complete' ? 'Success' : 'Ready'} tone={missionState === 'running' ? 'live' : missionState === 'complete' ? 'good' : 'idle'} /></div></div>
         <div className="control-group"><button className="primary-button" onClick={() => { setMissionState('running'); setStage('triggered'); }}><Play size={16} fill="currentColor" />Start Mission</button><button className="icon-button" onClick={() => { setMissionState('idle'); setStage('idle'); }}><Square size={14} fill="currentColor" /></button></div>
       </header>
-      <main className="dashboard-main">
+      <main className={cn("dashboard-main", !isSidebarOpen && "dashboard-main-collapsed")}>
         <section className="canvas-area"><ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes} edgeTypes={{ mission: MissionEdge }} fitView fitViewOptions={{ padding: 0.1 }} nodesConnectable={false} nodesDraggable={false} panOnDrag zoomOnScroll proOptions={{ hideAttribution: true }}><Background gap={40} size={1} color="#f1f5f9" /></ReactFlow></section>
-        <aside className="sidebar">
-          <Panel label="Flexible QoS Controls"><StatItem label="Profile" value={snapshot.qosProfile} /><StatItem label="Assurance" value={snapshot.qosState} /></Panel>
-          <Panel label="Burst Telemetry"><StatItem label="Target Bitrate" value={formatBitrate(snapshot.targetBitrate)} /><StatItem label="Payload Size" value={formatBytes(snapshot.burstSize)} /></Panel>
-          <Panel label="Path Intelligence"><StatItem label="Selected Route" value={snapshot.activePathLabel} /><StatItem label="Path Score" value={snapshot.pathScore} /></Panel>
-          <Panel label="Performance Metrics"><div className="grid grid-cols-2 gap-4"><MetricBox icon={Clock} label="Latency" value={snapshot.latency} color="blue" /><MetricBox icon={BarChart3} label="Bandwidth" value={snapshot.bandwidth} color="green" /></div></Panel>
-          <Panel label="Result Preview"><div className="panel-card bg-slate-50 border-dashed mt-1 min-h-[60px] flex items-center justify-center"><p className="text-[0.7rem] text-muted italic text-center px-4">{snapshot.resultSummary}</p></div></Panel>
+        <aside className={cn("sidebar", !isSidebarOpen && "sidebar-collapsed")}>
+          <button className="sidebar-toggle" onClick={() => setIsSidebarOpen(open => !open)} aria-label={isSidebarOpen ? 'Collapse right panel' : 'Expand right panel'}>
+            {isSidebarOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          </button>
+          {isSidebarOpen ? (
+            <div className="sidebar-content">
+              <Panel label="Flexible QoS Controls"><StatItem label="Profile" value={snapshot.qosProfile} /><StatItem label="Assurance" value={snapshot.qosState} /></Panel>
+              <Panel label="Burst Telemetry"><StatItem label="Target Bitrate" value={formatBitrate(snapshot.targetBitrate)} /><StatItem label="Payload Size" value={formatBytes(snapshot.burstSize)} /></Panel>
+              <Panel label="Path Intelligence"><StatItem label="Selected Route" value={snapshot.activePathLabel} /><StatItem label="Path Score" value={snapshot.pathScore} /></Panel>
+              <Panel label="Performance Metrics"><div className="grid grid-cols-2 gap-4"><MetricBox icon={Clock} label="Latency" value={snapshot.latency} color="blue" /><MetricBox icon={BarChart3} label="Bandwidth" value={snapshot.bandwidth} color="green" /></div></Panel>
+              <Panel label="Result Preview"><div className="panel-card bg-slate-50 border-dashed mt-1 min-h-[60px] flex items-center justify-center"><p className="text-[0.7rem] text-muted italic text-center px-4">{snapshot.resultSummary}</p></div></Panel>
+              <Panel label="Latest Activity">
+                <div className="event-feed">
+                  {visibleEvents.length > 0 ? visibleEvents.map(e => ( <div key={e.id} className={cn('event-row', `event-row-${e.tone}`)}><div className="event-content"><strong>{e.title}</strong><p>{e.detail}</p></div></div> )) : <div className="panel-card"><p className="text-[0.75rem] text-muted">No mission activity yet.</p></div>}
+                </div>
+              </Panel>
+            </div>
+          ) : (
+            <div className="sidebar-rail-label">Panel</div>
+          )}
         </aside>
       </main>
-      <footer className="bottom-strip"><div className="bottom-panel-section"><div className="panel-label">Workflow Timeline</div><div className="timeline-track"><div className="timeline-line" /><TimelineItem label="Trigger" stage="triggered" current={stage} /><TimelineItem label="UL Prep" stage="ul_qos_prep" current={stage} /><TimelineItem label="UL Send" stage="ul_sending" current={stage} /><TimelineItem label="Selection" stage="service_path_active" current={stage} /><TimelineItem label="Inference" stage="processing" current={stage} /><TimelineItem label="DL Mark" stage="dl_marking" current={stage} /><TimelineItem label="DL Send" stage="dl_sending" current={stage} /><TimelineItem label="Finish" stage="complete" current={stage} /></div></div><div className="bottom-panel-section"><div className="panel-label">Activity Log</div><div className="mt-2 h-[120px] overflow-y-auto pr-2">{visibleEvents.map(e => ( <div key={e.id} className={cn('event-row', `event-row-${e.tone}`)}><div className="event-content"><strong>{e.title}</strong><p>{e.detail}</p></div></div> ))}</div></div></footer>
     </div>
   );
 }
@@ -101,11 +115,6 @@ function Dashboard() {
 function Panel({ label, children }: any) { return ( <div className="panel-section"><div className="panel-label">{label}</div>{children}</div> ); }
 function StatItem({ label, value }: any) { return ( <div className="stat-item"><span className="stat-label">{label}</span><span className="stat-value">{value}</span></div> ); }
 function MetricBox({ icon: Icon, label, value, color }: any) { return ( <div className="panel-card flex flex-col items-center gap-1"><Icon size={18} className={`text-${color}-500`} /><span className="text-[0.65rem] text-muted uppercase font-bold tracking-wider">{label}</span><span className="text-sm font-bold">{value}</span></div> ); }
-function TimelineItem({ label, stage, current }: any) {
-  const idx = stageSequence.findIndex(s => s.stage === stage);
-  const currentIdx = stageSequence.findIndex(s => s.stage === current);
-  return ( <div className={cn("timeline-item", stage === current && "timeline-item-active", currentIdx > idx && "timeline-item-complete")}><div className="timeline-dot" /><span className="timeline-item-label">{label}</span></div> );
-}
 
 function MissionNode({ data }: NodeProps<Node<DemoNodeData>>) {
   const meta = kindMeta[data.kind];
@@ -136,10 +145,10 @@ function MissionNode({ data }: NodeProps<Node<DemoNodeData>>) {
       </div>
       {isUpf ? (
         <>
-          <Handle type="target" position={Position.Left} id="n3" className="mission-handle mission-handle-n3 mission-handle-left" style={{ top: '30%' }}>
+          <Handle type="target" position={Position.Left} id="n3" className="mission-handle mission-handle-n3 mission-handle-left" style={{ top: '70%' }}>
             <div className="handle-label">N3</div>
           </Handle>
-          <Handle type="target" position={Position.Left} id="n9-in" className="mission-handle mission-handle-n9-in mission-handle-left" style={{ top: '70%' }}>
+          <Handle type="target" position={Position.Left} id="n9-in" className="mission-handle mission-handle-n9-in mission-handle-left" style={{ top: '30%' }}>
             <div className="handle-label">N9</div>
           </Handle>
           <Handle type="source" position={Position.Right} id="n6" className="mission-handle mission-handle-n6 mission-handle-right" style={{ top: '70%' }}>
@@ -187,8 +196,9 @@ function buildGraph(snapshot: any) {
   const usingService = ['service_path_active', 'ul_complete', 'processing', 'dl_marking', 'dl_qos_active', 'dl_sending', 'complete'].includes(snapshot.stage);
   const nodes: Node[] = [
     // City Regions
-    { id: 'r1', type: 'region', position: { x: -20, y: -20 }, style: { width: 380, height: 480, zIndex: -1 }, data: { label: 'Shenzhen / Access' }, draggable: false },
-    { id: 'r4', type: 'region', position: { x: 780, y: -20 }, style: { width: 380, height: 480, zIndex: -1 }, data: { label: 'Shanghai / Service' }, draggable: false },
+    { id: 'r1', type: 'region', position: { x: -20, y: -20 }, style: { width: 380, height: 480, zIndex: -1 }, data: { label: 'Shenzhen' }, draggable: false },
+    { id: 'r4', type: 'region', position: { x: 780, y: -20 }, style: { width: 380, height: 480, zIndex: -1 }, data: { label: 'Shanghai' }, draggable: false },
+    { id: 'r5', type: 'region', position: { x: 780, y: 490 }, style: { width: 380, height: 190, zIndex: -1 }, data: { label: 'Beijing' }, draggable: false },
     
     // Backbone Split Regions
     { id: 'r2', type: 'region', position: { x: 380, y: -20 }, style: { width: 380, height: 230, zIndex: -1 }, data: { label: 'Optimized Service Path' }, draggable: false },
@@ -208,8 +218,11 @@ function buildGraph(snapshot: any) {
     { id: 'router-d2', type: 'mission', position: { x: 620, y: 85 }, data: { label: 'D-2', role: 'Router', kind: 'router', status: 'Dedicated Transit', active: usingService, emphasis: usingService } },
     
     // Shanghai
-    { id: 'upf-shanghai', type: 'mission', position: { x: 810, y: 200 }, data: { label: 'UPF-SH01', role: '6G UPF', kind: 'upf', status: 'Service Ingress', active: usingService || snapshot.stage === 'path_identifying', emphasis: usingService, upfRoles: { anchor: 'idle', service: usingService ? 'active' : (snapshot.stage === 'path_identifying' ? 'pending' : 'idle') } } },
-    { id: 'server', type: 'mission', position: { x: 1010, y: 200 }, data: { label: 'AI Server', role: 'Shanghai', kind: 'service', status: snapshot.resultStatus, active: snapshot.stage === 'processing' || snapshot.stage === 'complete' || snapshot.stage === 'ul_complete', emphasis: snapshot.stage === 'processing' } },
+    { id: 'upf-shanghai', type: 'mission', position: { x: 830, y: 200 }, data: { label: 'UPF-SH01', role: '6G UPF', kind: 'upf', status: 'Service Ingress', active: usingService || snapshot.stage === 'path_identifying', emphasis: usingService, upfRoles: { anchor: 'idle', service: usingService ? 'active' : (snapshot.stage === 'path_identifying' ? 'pending' : 'idle') } } },
+    { id: 'server', type: 'mission', position: { x: 1010, y: 295 }, data: { label: 'AI Server', role: 'Shanghai', kind: 'service', status: snapshot.resultStatus, active: snapshot.stage === 'processing' || snapshot.stage === 'complete' || snapshot.stage === 'ul_complete', emphasis: snapshot.stage === 'processing' } },
+
+    // Beijing
+    { id: 'upf-beijing', type: 'mission', position: { x: 900, y: 550 }, data: { label: 'UPF-BJ01', role: '6G UPF', kind: 'upf', status: 'Regional Standby', active: false, upfRoles: { anchor: 'idle', service: 'idle' } } },
   ];
   const edges: Edge[] = [
     { id: 'e-ue-gnb', source: 'ue', target: 'gnb', type: 'mission', data: { kind: 'burst', state: snapshot.direction !== 'NONE' ? 'active' : 'idle' } },
